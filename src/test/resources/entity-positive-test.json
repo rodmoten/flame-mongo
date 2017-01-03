@@ -1,0 +1,18 @@
+{
+  "type": 9,
+  "id": "9",
+  "name": "default",
+  "properties": {
+    "report": true,
+    "style": "font",
+    "attrs": {
+      "type": null,
+      "name": "Sector"
+    },
+    "geometry": {
+      "type": "square",
+      "angle": 37.052581787109375
+    }
+  }
+}
+
