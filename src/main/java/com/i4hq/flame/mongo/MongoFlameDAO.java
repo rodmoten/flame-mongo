@@ -320,9 +320,9 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 * @return
 	 */
 	private List<Document> toEntityAttributesDocuments(FlameEntity entity){
-		List<Document> docs = new ArrayList<>(entity.getAttributes().size());
+		List<Document> docs = new ArrayList<>(entity.size());
 		// Create a document for each attribute.
-		for (Entry<String, AttributeValue> attribute : entity.getAttributes().entrySet()){
+		for (Entry<String, AttributeValue> attribute : entity.getAttributes()){
 			Document doc = new Document(ID_FIELD, attribute.getKey());
 			AttributeType attributeType = attribute.getValue().getType();
 			doc.append(VALUE_FIELD, attributeType.convertToJava(attribute.getValue().getValue()));

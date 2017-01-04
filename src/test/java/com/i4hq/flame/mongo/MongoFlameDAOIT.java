@@ -32,10 +32,10 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
 		String expectedType = entity.getType();
 		assertEquals("type",expectedType, retrievedEntity.getType());
-		for (Entry<String, AttributeValue> expectedEntry : entity.getAttributes().entrySet()) {
+		for (Entry<String, AttributeValue> expectedEntry : entity.getAttributes()) {
 			String expectedAttributeName = expectedEntry.getKey();
 			AttributeValue expectedAttributeValue = expectedEntry.getValue();
-			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttributes().get(expectedAttributeName));
+			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
 		
