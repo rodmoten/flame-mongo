@@ -7,6 +7,7 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -15,6 +16,12 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Consumer;
 
+import org.bson.BsonArray;
+import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonElement;
+import org.bson.BsonString;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.slf4j.Logger;
@@ -26,6 +33,7 @@ import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
+import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GeospatialPosition;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoClient;
@@ -35,9 +43,6 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.InsertManyOptions;
 import com.mongodb.client.model.Updates;
-import com.mongodb.client.model.geojson.Polygon;
-import com.mongodb.client.model.geojson.PolygonCoordinates;
-import com.mongodb.client.model.geojson.Position;
 
 /**
  * @author rmoten
@@ -51,6 +56,8 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private static final String VALUE_FIELD = "value";
 	private static final String TYPE_EXPR_FIELD = "type_expr";
 
+	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
+
 
 	private final class AddAttributeToEntityAction implements Consumer<Document> {
 		private final Map<String, FlameEntity> resultEntities;
@@ -61,17 +68,58 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 		@Override
 		public void accept(Document t) {
+			logger.debug("Found doc: {}", t);
 			String entityId = t.getString(ID_FIELD);
 			FlameEntity entity = resultEntities.get(entityId);
 			if (entity == null){
-				entity = FlameEntity.createEntity(entityId);
+				entity = FlameEntityFactory.createEntity(entityId);
 				resultEntities.put(entityId, entity);
 			}
-			entity.addAttribute(t.getString(ID_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
+			addAttributeInJsonToEntity(entity, t);
+		}
+
+	}
+	
+	/**
+	 * This class handle results from queries that join the entities collectiona and the entity_attributes collection, such as a search for entities within a specific region.
+	 * @author rmoten
+	 *
+	 */
+	private final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
+		private final Map<String, FlameEntity> resultEntities;
+		private final String attributesFieldName;
+
+		private AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {
+			this.resultEntities = resultEntities;
+			this.attributesFieldName = attributesFieldName;
+		}
+
+		@Override
+		public void accept(Document t) {
+			logger.debug("Found doc: {}", t);
+			String entityId = t.getString(ID_FIELD);
+			FlameEntity entity = resultEntities.get(entityId);
+			if (entity == null){
+				entity = FlameEntityFactory.createEntity(entityId);
+				resultEntities.put(entityId, entity);
+			}
+			// Get the attributes of the entity
+			@SuppressWarnings("unchecked")
+			List<Document> attributes = (List<Document>) t.get(attributesFieldName);
+			for (Document attribute : attributes){
+				addAttributeInJsonToEntity(entity, attribute);
+			}
 		}
 	}
 
-
+	/**
+	 * @param entity
+	 * @param t
+	 */
+	private void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
+		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
+	}
+	
 	/**
 	 * This enumeration indicates the steps performed in a save transaction of an entity.
 	 * This is needed because a save transaction has to write to multiple collections.
@@ -90,6 +138,9 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private static final String TS_FIELD = "ts";
 	private static final String NAME_FIELD = "name";
 	private static final String ID_FIELD = "_id";
+	public static final String LOCATION_FIELD = "loc";
+
+	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static MongoFlameDAO instance = new MongoFlameDAO();
 
 	public static MongoFlameDAO getInstance() {
@@ -257,6 +308,9 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		try {
 			String typeHash = createHash(entity.getType());
 			Document entitiesDocument = new Document(ID_FIELD, entity.getId()).append(TYPE_FIELD, typeHash);
+			if (entity.getGeospatialPosition() != null) {
+				entitiesDocument.append(LOCATION_FIELD, toGeoJsonPoint(entity.getGeospatialPosition()));
+			}
 			Document typesDocument = new Document(ID_FIELD, typeHash).append(TYPE_EXPR_FIELD, entity.getType());
 			List<Document> attributes = toEntityAttributesDocuments(entity);
 
@@ -291,6 +345,12 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		return insertCompletedSuccessfully;
 	}
 
+	private Document toGeoJsonPoint(GeospatialPosition gp) {
+		Document doc = Document.parse(String.format("{ type: 'Point', coordinates: [ %f, %f ] }", gp.getLongitude(), gp.getLatitude()));
+		return doc;
+	}
+
+
 	private String createHash(String type) {
 		try {
 			MessageDigest md = MessageDigest.getInstance("MD5");
@@ -323,10 +383,14 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		List<Document> docs = new ArrayList<>(entity.size());
 		// Create a document for each attribute.
 		for (Entry<String, AttributeValue> attribute : entity.getAttributes()){
-			Document doc = new Document(ID_FIELD, attribute.getKey());
+			final String attributePathName = attribute.getKey();
+			
+			Document doc = new Document(ID_FIELD, entity.getEntityIdPrefix() + attributePathName);
 			AttributeType attributeType = attribute.getValue().getType();
 			doc.append(VALUE_FIELD, attributeType.convertToJava(attribute.getValue().getValue()));
 			doc.append(TYPE_FIELD, attributeType.toString());
+			doc.append(ENTITY_ID_FIELD, entity.getId());
+			doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
 			docs.add(doc);
 		}
 
@@ -346,12 +410,12 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 	@Override
 	public FlameEntity getEntitiesById(final String id) {
-		final FlameEntity entity = FlameEntity.createEntity(id);
+		final FlameEntity entity = FlameEntityFactory.createEntity(id);
 		Consumer<Document> addAttribute = new Consumer<Document>(){
 
 			@Override
 			public void accept(Document t) {
-				entity.addAttribute(t.getString(ID_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
+				addAttributeInJsonToEntity(entity, t);
 			}
 		};
 
@@ -386,7 +450,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	@Override
 	public Collection<FlameEntity> getEntitiesByAttributeExpression(AttributeExpression expr) {
 		switch(expr.getOperator()){
-		case IN:
+		case WITHIN:
 			return getAttributiesByGeospatialRegion(expr.getAttributeName(), expr.getCoordinates());
 		default:
 			return new LinkedList<>();
@@ -397,24 +461,62 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private Collection<FlameEntity> getAttributiesByGeospatialRegion(String attributeName, GeospatialPosition[] geospatialPositions) {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
 
-		Consumer<Document> addAttribute = new AddAttributeToEntityAction(resultEntities);		
+		String attributesFieldName = "attributes";
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName);		
 
-		if (geospatialPositions.length < 8 && geospatialPositions.length % 2 != 0) {
-
+		if (geospatialPositions.length < 3) {
+			logger.info("Not enough points to form a polygon.");
+			return resultEntities.values();
 		}
-		List<Position> positions = new LinkedList<>();
-		for (GeospatialPosition gp : geospatialPositions) {
 
-			Position p = new Position(gp.getLongitude(), gp.getLatitude());
-			positions.add(p);
+		// Here an example of the kind of query we are trying to generate.
+//		db.entities.aggregate([{$match: { loc: { $geoWithin: { $geometry: { type: "Polygon", coordinates: [ [ [ 20.73414993286133, 56.85886001586914 ], 
+//		[ 20.29469680786133, 33.51984024047852 ], [ 70.91969299316406, 33.66626358032227 ], [ 63.97633743286133, 57.14605331420898 ], [ 50.00172805786133, 57.288818359375 ], 
+//		[ 20.73414993286133, 56.85886001586914 ] ] ] } } } }}, 
+//		{$lookup: { from:"entity_attributes", localField:"_id", foreignField: "entity_id", as: "attributes"}}])
+
+		List<BsonValue> coordinates = new LinkedList<>();
+		// The first point must be the first and last in the list.
+		BsonArray firstPosition = createBsonGeoCoordinate(geospatialPositions[0]);
+		coordinates.add(firstPosition);
+
+		for (int i = 1; i < geospatialPositions.length; i++) {
+			GeospatialPosition gp = geospatialPositions[i];
+			BsonArray p = createBsonGeoCoordinate(gp);
+			coordinates.add(p);
 		}
-		@SuppressWarnings("unchecked")
-		PolygonCoordinates polyGoncoordinates = new PolygonCoordinates(positions);
-		Polygon polygon = new Polygon(polyGoncoordinates);
+		coordinates.add(firstPosition);
+		BsonDocument geoWithin =
+				new BsonDocument("$geoWithin",
+						new BsonDocument("$geometry", new BsonDocument(Arrays.asList(
+				new BsonElement("type", new BsonString("Polygon")),
+				new BsonElement ("coordinates", new BsonArray(Arrays.asList(new BsonArray(coordinates))))))));
+		
+		BsonDocument match = new BsonDocument("$match", new BsonDocument(LOCATION_FIELD, geoWithin));
+		
+		// This is used to join the entities in the polygon to their attributes.
+		BsonDocument lookup = new BsonDocument("$lookup",new BsonDocument(Arrays.asList(
+				new BsonElement("from", new BsonString("entity_attributes")),
+				new BsonElement("localField", new BsonString("_id")),
+				new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
+				new BsonElement("as", new BsonString(attributesFieldName))
+				)));
+		
+		List<? extends Bson> pipelines = Arrays.asList(match, lookup);
 
-		entityAttributesCollection.find(Filters.geoWithin("location", polygon)).forEach(addAttribute);;
+		entitiesCollection.aggregate(pipelines).forEach(addAttribute);
 
+		logger.debug("Number of results: {}", resultEntities.size());
 		return resultEntities.values();
+	}
+
+
+	/**
+	 * @param gp
+	 * @return
+	 */
+	private BsonArray createBsonGeoCoordinate(GeospatialPosition gp) {
+		return new BsonArray(Arrays.asList(new BsonDouble(gp.getLongitude()), new BsonDouble(gp.getLatitude())));
 	}
 
 }

@@ -4,7 +4,7 @@ db.runCommand( { dropDatabase: 1 } );
 db.attribute_names.createIndex({name : 1});
 db.attribute_names.createIndex({ts : 1});
 db.entities.createIndex({type:1});
-db.entities.createIndex({"location" : "2dsphere"});
+db.entities.createIndex({"loc" : "2dsphere"});
 db.createCollection("entity_attributes");
 db.createCollection("types");
 db.createCollection("locks");

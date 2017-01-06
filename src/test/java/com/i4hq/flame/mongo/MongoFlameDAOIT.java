@@ -1,6 +1,6 @@
 package com.i4hq.flame.mongo;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
 
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
@@ -12,8 +12,8 @@ import org.junit.Test;
 
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
+import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GuidEntityIdFactory;
-import com.i4hq.flame.mongo.MongoFlameDAO;
 
 public class MongoFlameDAOIT {
 
@@ -22,7 +22,7 @@ public class MongoFlameDAOIT {
 	@Test
 	public void testSaveEntity() throws Exception {
 		StringBuilder jsonText = readJsonFromFile("src/test/resources/entity-positive-test.json");
-		FlameEntity entity = FlameEntity.createFromJson(GuidEntityIdFactory.getInstance(), dao, jsonText.toString());
+		FlameEntity entity = FlameEntityFactory.createFromJson(GuidEntityIdFactory.getInstance(), dao, jsonText.toString());
 		
 		assertEquals("saved", true, dao.save(entity));
 		
