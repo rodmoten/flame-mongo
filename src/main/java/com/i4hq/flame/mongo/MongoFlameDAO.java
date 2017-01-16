@@ -79,7 +79,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 
 	}
-	
+
 	/**
 	 * This class handle results from queries that join the entities collectiona and the entity_attributes collection, such as a search for entities within a specific region.
 	 * @author rmoten
@@ -119,7 +119,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
 		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
 	}
-	
+
 	/**
 	 * This enumeration indicates the steps performed in a save transaction of an entity.
 	 * This is needed because a save transaction has to write to multiple collections.
@@ -139,6 +139,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private static final String NAME_FIELD = "name";
 	private static final String ID_FIELD = "_id";
 	public static final String LOCATION_FIELD = "loc";
+	private static final String CONCEPT_FIELD = "concepts";
 
 	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static MongoFlameDAO instance = new MongoFlameDAO();
@@ -156,7 +157,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private MongoCollection<Document> entitiesCollection;
 	private MongoCollection<Document> entityAttributesCollection;
 
-	private int maxCacheSize = 1024 * 10;
+	private int maxCacheSize = 1024 * 100;
 	private long lastCacheUpdate = 0;
 
 	private MongoFlameDAO () {
@@ -207,30 +208,41 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		if (idOfAttribute != null) {
 			return idOfAttribute;
 		}
+		int numOfAttempts = 0;
+		do {
+			numOfAttempts++;
+			// Update the caches with the latest from centralized store including the one we are looking for.
+			updateCache(attributeName);
 
-		// Update the caches with the latest from centralized store including the one we are looking for.
-		updateCache(attributeName);
+			// Check if the ID is in the cache.
+			idOfAttribute = attributeIds.get(attributeName);
+			if (idOfAttribute != null) {
+				if (numOfAttempts > 1) {
+					logger.warn("Using {} for attribute {}", idOfAttribute, attributeName);
+				}
+				return idOfAttribute;
+			}
 
-		// Check if the ID is in the cache.
-		idOfAttribute = attributeIds.get(attributeName);
-		if (idOfAttribute != null) {
-			return idOfAttribute;
-		}
+			// Obtain exclusive access to the attribute names collection. 
+			lockAttributeStore();
+			try {
+				// Make the ID the total number of attributes plus 1.
+				idOfAttribute = attributesCollection.count() +1;
 
-		// Obtain exclusive access to the attribute names collection. 
-		lockAttributeStore();
-		try {
-			// Make the ID the total number of attributes plus 1.
-			idOfAttribute = attributesCollection.count() +1;
+				// Write the new ID to the store.
+				attributesCollection.insertOne(new Document().append(ID_FIELD, idOfAttribute).append(NAME_FIELD, attributeName).append(TS_FIELD, System.currentTimeMillis()));
 
-			// Write the new ID to the store.
-			attributesCollection.insertOne(new Document().append(ID_FIELD, idOfAttribute).append(NAME_FIELD, attributeName).append(TS_FIELD, System.currentTimeMillis()));
+				// update the cache 
+				attributeIds.put(attributeName, idOfAttribute);
+			} catch (com.mongodb.MongoWriteException ex) {
+				logger.warn("Attempt " + numOfAttempts + ": Error writing attribute " + attributeName);
+				idOfAttribute = null;
 
-			// update the cache 
-			attributeIds.put(attributeName, idOfAttribute);
-		} finally {
-			unlockAttributeStore();
-		}
+			}finally {
+				unlockAttributeStore();
+			}
+		} while(idOfAttribute == null);
+
 		return idOfAttribute;
 	}
 
@@ -263,7 +275,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 * @param attributeName
 	 */
 	protected synchronized void updateCache(final String attributeName) {
-		int numberToFetch = attributeIds.isEmpty() ? maxCacheSize : (int) (maxCacheSize * 0.10);
+		int numberToFetch = maxCacheSize; //attributeIds.isEmpty() ? maxCacheSize : (int) (maxCacheSize * 0.10);
 		connect();
 
 		// We want to update the cache with a specific attribute name and all other new attributes added since we last updated the cache.
@@ -319,6 +331,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 				typesCollection.insertOne(typesDocument);
 			} catch (MongoWriteException ex) {
 				// Assume this only occurs when the type already exists. Therefore we ignore it since different entities may have the same type.
+				logger.debug(ex.getMessage());
 			}
 
 			// Save to entities collection.
@@ -326,7 +339,8 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 				entitiesCollection.insertOne(entitiesDocument);
 				step = SaveTransactionStep.SAVED_TO_ENTITIES_COLLECTION;
 			} catch (MongoWriteException ex) {
-				// Assuming we only get this when we inserting an entity that already exists. 
+				// Assuming we only get this when we inserting an entity that already exists.
+				logger.debug(ex.getMessage());
 			}
 
 			// Save attributes.
@@ -334,7 +348,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 			try {
 				entityAttributesCollection.insertMany(attributes,new InsertManyOptions().ordered(false));
 			} catch (MongoBulkWriteException ex) {
-				// Assuming we only get this when we inserting attributes that already exists. 
+				logger.debug(ex.getMessage()); 
 			}
 			insertCompletedSuccessfully = true;
 		} 
@@ -362,6 +376,19 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 	}
 
+	private String createAttributeId(Object attributeValue, String attributeName, byte[] entityId) {
+		try {
+			MessageDigest md = MessageDigest.getInstance("MD5");
+			md.update(attributeValue == null ? "".getBytes() : attributeValue.toString().getBytes());
+			md.update(attributeName.getBytes());
+			md.update(entityId);
+			return new BigInteger(1,md.digest()).toString(16);
+		} catch (NoSuchAlgorithmException e) {
+			logger.error("MD5", e);
+			throw new RuntimeException(e);
+		}
+	}
+
 	@Override
 	public int save(List<FlameEntity> entities) {
 		int count = 0;
@@ -381,16 +408,21 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 */
 	private List<Document> toEntityAttributesDocuments(FlameEntity entity){
 		List<Document> docs = new ArrayList<>(entity.size());
+		byte[] entityIdInBytes = entity.getId().getBytes();
+
 		// Create a document for each attribute.
 		for (Entry<String, AttributeValue> attribute : entity.getAttributes()){
 			final String attributePathName = attribute.getKey();
-			
-			Document doc = new Document(ID_FIELD, entity.getEntityIdPrefix() + attributePathName);
+
+			Document doc = new Document();
 			AttributeType attributeType = attribute.getValue().getType();
-			doc.append(VALUE_FIELD, attributeType.convertToJava(attribute.getValue().getValue()));
+			Object attributeValue = attributeType.convertToJava(attribute.getValue().getValue());
+			doc.append(ID_FIELD, createAttributeId(attributeValue, attributePathName, entityIdInBytes));
+			doc.append(VALUE_FIELD, attributeValue);
 			doc.append(TYPE_FIELD, attributeType.toString());
 			doc.append(ENTITY_ID_FIELD, entity.getId());
 			doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
+			doc.append(TS_FIELD, System.currentTimeMillis());
 			docs.add(doc);
 		}
 
@@ -419,7 +451,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 			}
 		};
 
-		entityAttributesCollection.find(Filters.regex(ID_FIELD, entity.getEntityIdPrefix() + "*")).forEach(addAttribute);
+		entityAttributesCollection.find(Filters.eq(ENTITY_ID_FIELD, entity.getId())).forEach(addAttribute);
 
 		return entity;
 	}
@@ -470,10 +502,10 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 
 		// Here an example of the kind of query we are trying to generate.
-//		db.entities.aggregate([{$match: { loc: { $geoWithin: { $geometry: { type: "Polygon", coordinates: [ [ [ 20.73414993286133, 56.85886001586914 ], 
-//		[ 20.29469680786133, 33.51984024047852 ], [ 70.91969299316406, 33.66626358032227 ], [ 63.97633743286133, 57.14605331420898 ], [ 50.00172805786133, 57.288818359375 ], 
-//		[ 20.73414993286133, 56.85886001586914 ] ] ] } } } }}, 
-//		{$lookup: { from:"entity_attributes", localField:"_id", foreignField: "entity_id", as: "attributes"}}])
+		//		db.entities.aggregate([{$match: { loc: { $geoWithin: { $geometry: { type: "Polygon", coordinates: [ [ [ 20.73414993286133, 56.85886001586914 ], 
+		//		[ 20.29469680786133, 33.51984024047852 ], [ 70.91969299316406, 33.66626358032227 ], [ 63.97633743286133, 57.14605331420898 ], [ 50.00172805786133, 57.288818359375 ], 
+		//		[ 20.73414993286133, 56.85886001586914 ] ] ] } } } }}, 
+		//		{$lookup: { from:"entity_attributes", localField:"_id", foreignField: "entity_id", as: "attributes"}}])
 
 		List<BsonValue> coordinates = new LinkedList<>();
 		// The first point must be the first and last in the list.
@@ -489,11 +521,11 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		BsonDocument geoWithin =
 				new BsonDocument("$geoWithin",
 						new BsonDocument("$geometry", new BsonDocument(Arrays.asList(
-				new BsonElement("type", new BsonString("Polygon")),
-				new BsonElement ("coordinates", new BsonArray(Arrays.asList(new BsonArray(coordinates))))))));
-		
+								new BsonElement("type", new BsonString("Polygon")),
+								new BsonElement ("coordinates", new BsonArray(Arrays.asList(new BsonArray(coordinates))))))));
+
 		BsonDocument match = new BsonDocument("$match", new BsonDocument(LOCATION_FIELD, geoWithin));
-		
+
 		// This is used to join the entities in the polygon to their attributes.
 		BsonDocument lookup = new BsonDocument("$lookup",new BsonDocument(Arrays.asList(
 				new BsonElement("from", new BsonString("entity_attributes")),
@@ -501,7 +533,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 				new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
 				new BsonElement("as", new BsonString(attributesFieldName))
 				)));
-		
+
 		List<? extends Bson> pipelines = Arrays.asList(match, lookup);
 
 		entitiesCollection.aggregate(pipelines).forEach(addAttribute);

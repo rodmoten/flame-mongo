@@ -1,4 +1,4 @@
-mongo $1 << EOF
+mongo $* << EOF
 use flame
 db.runCommand( { dropDatabase: 1 } );
 db.attribute_names.createIndex({name : 1});
