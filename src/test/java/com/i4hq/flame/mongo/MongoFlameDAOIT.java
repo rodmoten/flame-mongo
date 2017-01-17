@@ -22,8 +22,7 @@ public class MongoFlameDAOIT {
 	
 	@Test
 	public void testSaveEntity_unbufferedWrites() throws Throwable {
-		dao.getBulkWriter().setBufferWriteThreshold(0);
-		dao.getBulkWriter().setWaitTimeBeforeFlush(0);
+		dao.setBufferWriteThreshold(0);
 		
 		final String filePath = "src/test/resources/entity1.json";
 		FlameEntity entity = readEntityFromFile(filePath);
@@ -53,8 +52,7 @@ public class MongoFlameDAOIT {
 	
 	@Test
 	public void testSaveEntity_bufferedWrites() throws Throwable {
-		dao.getBulkWriter().setBufferWriteThreshold(10);
-		dao.getBulkWriter().setWaitTimeBeforeFlush(1000 * 60);
+		dao.setBufferWriteThreshold(10000);
 		
 		final String filePath = "src/test/resources/entity2.json";
 		FlameEntity entity2 = readEntityFromFile(filePath);
@@ -65,7 +63,7 @@ public class MongoFlameDAOIT {
 
 		FlameEntity retrievedEntity = dao.getEntitiesById(id2);
 		assertEquals("num of attributes before flush", 0, retrievedEntity.getAttributes().size());
-		
+		dao.setBufferWriteThreshold(10);
 		FlameEntity entity1 = readEntityFromFile("src/test/resources/entity1.json");
 		
 		assertEquals("saved", true, dao.save(entity1));

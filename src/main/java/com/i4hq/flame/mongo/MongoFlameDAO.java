@@ -79,15 +79,15 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 
 	}
-	
+
 	public class BulkWriter {
 
 		private long lastWrite = System.currentTimeMillis();
-		private long waitTimeBeforeFlush = Long.parseLong(System.getProperty("MONGO_FLAME_BULK_WRITE_WAITTIME", "500"));
+		private long waitTimeBeforeFlush;
 		/**
 		 * The minimum number of documents to keep in memory before sending to the server.
 		 */
-		private int bufferWriteThreshold = Integer.parseInt(System.getProperty("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD", "500"));
+		private int bufferWriteThreshold;
 
 		private final InsertManyOptions insertManyOptions = new InsertManyOptions().ordered(false);
 		private List<Document> buffer = new LinkedList<>();
@@ -95,6 +95,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 		public BulkWriter(MongoCollection<Document> collection) {
 			this.collection = collection;
+			setBufferWriteThreshold(Integer.parseInt(System.getProperty("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD", "1000")));
 			logger.info("MONGO_FLAME_BULK_WRITE_WAITTIME = {}", waitTimeBeforeFlush);
 			logger.info("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD = {}", bufferWriteThreshold);
 		}
@@ -106,37 +107,39 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		 */
 		public boolean write(List<Document> docs) {
 			buffer.addAll(docs);
+			return flush();
 
+		}
+
+		private boolean flush() {
 			if (buffer.size() > bufferWriteThreshold || System.currentTimeMillis() - lastWrite > waitTimeBeforeFlush){
-				flush();
+				try {				
+					collection.insertMany(buffer, insertManyOptions);
+				} catch (MongoBulkWriteException ex) {
+					logger.debug(ex.getMessage()); 
+				} finally {
+					buffer = new LinkedList<>();
+					lastWrite = System.currentTimeMillis();
+				}
 				return true;
 			}
 			return false;
-
-		}
-
-		private void flush() {
-			try {				
-				collection.insertMany(buffer, insertManyOptions);
-			} catch (MongoBulkWriteException ex) {
-				logger.debug(ex.getMessage()); 
-			} finally {
-				buffer = new LinkedList<>();
-				lastWrite = System.currentTimeMillis();
-			}
-		}
-
-		public void setWaitTimeBeforeFlush(long waitTimeBeforeFlush) {
-			this.waitTimeBeforeFlush = waitTimeBeforeFlush;
 		}
 
 		public void setBufferWriteThreshold(int bufferWriteThreshold) {
 			this.bufferWriteThreshold = bufferWriteThreshold;
+			waitTimeBeforeFlush = this.bufferWriteThreshold + (long) (this.bufferWriteThreshold * 0.10);
+		}
+
+		public boolean write(Document doc) {
+			buffer.add(doc);
+			return flush();
+
 		}
 
 	}
 
-	
+
 
 	/**
 	 * This class handle results from queries that join the entities collectiona and the entity_attributes collection, such as a search for entities within a specific region.
@@ -217,8 +220,11 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 	private int maxCacheSize = 1024 * 100;
 	private long lastCacheUpdate = 0;
-	private BulkWriter entityAttributesBulkWriter;
-	
+	private BulkWriter[] bulkWriters = new BulkWriter[3];
+	final private int entityAttributesBulkWriter = 0;
+	final private int entityBulkWriter = 1;
+	final private int typesBulkWriter = 2;
+
 	private MongoFlameDAO () {
 		init();
 	}	
@@ -229,7 +235,11 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 */
 	@Override
 	protected void finalize() throws Throwable {
-		entityAttributesBulkWriter.flush();
+		for(BulkWriter writer : bulkWriters) {
+			if (writer != null) {
+				writer.flush();
+			}
+		}
 		mongoClient.close();
 		super.finalize();
 	}
@@ -247,8 +257,9 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		entityAttributesCollection = database.getCollection("entity_attributes");
 		locks = database.getCollection("locks");
 		isConnected = true;
-		entityAttributesBulkWriter = new BulkWriter(entityAttributesCollection);
-
+		bulkWriters[entityAttributesBulkWriter] = new BulkWriter(entityAttributesCollection);
+		bulkWriters[entityBulkWriter] = new BulkWriter(entitiesCollection);
+		bulkWriters[typesBulkWriter] = new BulkWriter(typesCollection);
 		updateCache("");
 	}
 
@@ -389,7 +400,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 			// Save type. No need to roll this back. May through an exception because of a duplicate type
 			try {
-				typesCollection.insertOne(typesDocument);
+				bulkWriters[typesBulkWriter].write(typesDocument);
 			} catch (MongoWriteException ex) {
 				// Assume this only occurs when the type already exists. Therefore we ignore it since different entities may have the same type.
 				logger.debug(ex.getMessage());
@@ -397,7 +408,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 			// Save to entities collection.
 			try {
-				entitiesCollection.insertOne(entitiesDocument);
+				bulkWriters[this.entityBulkWriter].write(entitiesDocument);
 				step = SaveTransactionStep.SAVED_TO_ENTITIES_COLLECTION;
 			} catch (MongoWriteException ex) {
 				// Assuming we only get this when we inserting an entity that already exists.
@@ -407,7 +418,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 			// Save attributes.
 			// Fail if any insert fails.
 			try {
-				entityAttributesBulkWriter.write(attributes);
+				bulkWriters[entityAttributesBulkWriter].write(attributes);
 			} catch (MongoBulkWriteException ex) {
 				logger.debug(ex.getMessage()); 
 			}
@@ -425,7 +436,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		return doc;
 	}
 
-	
+
 	private String createHash(String type) {
 		try {
 			MessageDigest md = MessageDigest.getInstance("MD5");
@@ -614,9 +625,12 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		return new BsonArray(Arrays.asList(new BsonDouble(gp.getLongitude()), new BsonDouble(gp.getLatitude())));
 	}
 
+	public void setBufferWriteThreshold(int i) {
+		for (BulkWriter writer : bulkWriters) {
+			writer.setBufferWriteThreshold(i);
+		}
 
-	public BulkWriter getBulkWriter() {
-		return entityAttributesBulkWriter;
+
 	}
 
 }
