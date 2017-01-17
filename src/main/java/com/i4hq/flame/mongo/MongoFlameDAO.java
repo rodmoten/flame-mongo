@@ -83,11 +83,11 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	public class BulkWriter {
 
 		private long lastWrite = System.currentTimeMillis();
-		private long waitTimeBeforeFlush = Long.parseLong(System.getProperty("MONGO_FLAME.BULK_WRITE_WAITTIME", "500"));
+		private long waitTimeBeforeFlush = Long.parseLong(System.getProperty("MONGO_FLAME_BULK_WRITE_WAITTIME", "500"));
 		/**
 		 * The minimum number of documents to keep in memory before sending to the server.
 		 */
-		private int bufferWriteThreshold = Integer.parseInt(System.getProperty("MONGO_FLAME.BULK_WRITE_MIN_THRESHOLD", "500"));
+		private int bufferWriteThreshold = Integer.parseInt(System.getProperty("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD", "500"));
 
 		private final InsertManyOptions insertManyOptions = new InsertManyOptions().ordered(false);
 		private List<Document> buffer = new LinkedList<>();
@@ -95,6 +95,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 		public BulkWriter(MongoCollection<Document> collection) {
 			this.collection = collection;
+			logger.info("MONGO_FLAME_BULK_WRITE_WAITTIME = {}", waitTimeBeforeFlush);
 		}
 
 		/**
