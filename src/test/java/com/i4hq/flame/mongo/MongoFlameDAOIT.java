@@ -19,10 +19,14 @@ public class MongoFlameDAOIT {
 
 	private MongoFlameDAO dao = MongoFlameDAO.getInstance();
 	
+	
 	@Test
-	public void testSaveEntity() throws Exception {
-		StringBuilder jsonText = readJsonFromFile("src/test/resources/entity-positive-test.json");
-		FlameEntity entity = FlameEntityFactory.createFromJson(GuidEntityIdFactory.getInstance(), dao, jsonText.toString());
+	public void testSaveEntity_unbufferedWrites() throws Throwable {
+		dao.getBulkWriter().setBufferWriteThreshold(0);
+		dao.getBulkWriter().setWaitTimeBeforeFlush(0);
+		
+		final String filePath = "src/test/resources/entity1.json";
+		FlameEntity entity = readEntityFromFile(filePath);
 		
 		assertEquals("saved", true, dao.save(entity));
 		
@@ -38,6 +42,43 @@ public class MongoFlameDAOIT {
 			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
+		
+	}
+
+	private FlameEntity readEntityFromFile(final String filePath) throws FileNotFoundException, IOException {
+		StringBuilder jsonText = readJsonFromFile(filePath);
+		FlameEntity entity = FlameEntityFactory.createFromJson(GuidEntityIdFactory.getInstance(), dao, jsonText.toString());
+		return entity;
+	}
+	
+	@Test
+	public void testSaveEntity_bufferedWrites() throws Throwable {
+		dao.getBulkWriter().setBufferWriteThreshold(10);
+		dao.getBulkWriter().setWaitTimeBeforeFlush(1000 * 60);
+		
+		final String filePath = "src/test/resources/entity2.json";
+		FlameEntity entity2 = readEntityFromFile(filePath);
+		
+		assertEquals("saved", true, dao.save(entity2));
+		
+		String id2 = entity2.getId();
+
+		FlameEntity retrievedEntity = dao.getEntitiesById(id2);
+		assertEquals("num of attributes before flush", 0, retrievedEntity.getAttributes().size());
+		
+		FlameEntity entity1 = readEntityFromFile("src/test/resources/entity1.json");
+		
+		assertEquals("saved", true, dao.save(entity1));
+		
+		retrievedEntity = dao.getEntitiesById(id2);
+		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
+		String expectedType = entity2.getType();
+		assertEquals("type",expectedType, retrievedEntity.getType());
+		for (Entry<String, AttributeValue> expectedEntry : entity2.getAttributes()) {
+			String expectedAttributeName = expectedEntry.getKey();
+			AttributeValue expectedAttributeValue = expectedEntry.getValue();
+			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
+		}
 		
 	}
 

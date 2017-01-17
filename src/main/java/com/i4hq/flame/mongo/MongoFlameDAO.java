@@ -79,6 +79,61 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 
 	}
+	
+	public class BulkWriter {
+
+		private long lastWrite = System.currentTimeMillis();
+		private long waitTimeBeforeFlush = Long.parseLong(System.getProperty("MONGO_FLAME.BULK_WRITE_WAITTIME", "500"));
+		/**
+		 * The minimum number of documents to keep in memory before sending to the server.
+		 */
+		private int bufferWriteThreshold = Integer.parseInt(System.getProperty("MONGO_FLAME.BULK_WRITE_MIN_THRESHOLD", "500"));
+
+		private final InsertManyOptions insertManyOptions = new InsertManyOptions().ordered(false);
+		private List<Document> buffer = new LinkedList<>();
+		private final MongoCollection<Document> collection;
+
+		public BulkWriter(MongoCollection<Document> collection) {
+			this.collection = collection;
+		}
+
+		/**
+		 * @param collection
+		 * @param docs
+		 * @return Returns true if and only if it performed the write.
+		 */
+		public boolean write(List<Document> docs) {
+			buffer.addAll(docs);
+
+			if (buffer.size() > bufferWriteThreshold || System.currentTimeMillis() - lastWrite > waitTimeBeforeFlush){
+				flush();
+				return true;
+			}
+			return false;
+
+		}
+
+		private void flush() {
+			try {				
+				collection.insertMany(buffer, insertManyOptions);
+			} catch (MongoBulkWriteException ex) {
+				logger.debug(ex.getMessage()); 
+			} finally {
+				lastWrite = System.currentTimeMillis();
+			}
+		}
+
+		public void setWaitTimeBeforeFlush(long waitTimeBeforeFlush) {
+			this.waitTimeBeforeFlush = waitTimeBeforeFlush;
+		}
+
+		public void setBufferWriteThreshold(int bufferWriteThreshold) {
+			this.bufferWriteThreshold = bufferWriteThreshold;
+		}
+
+	}
+
+	
 
 	/**
 	 * This class handle results from queries that join the entities collectiona and the entity_attributes collection, such as a search for entities within a specific region.
@@ -159,7 +214,8 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 	private int maxCacheSize = 1024 * 100;
 	private long lastCacheUpdate = 0;
-
+	private BulkWriter entityAttributesBulkWriter;
+	
 	private MongoFlameDAO () {
 		init();
 	}	
@@ -170,6 +226,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 */
 	@Override
 	protected void finalize() throws Throwable {
+		entityAttributesBulkWriter.flush();
 		mongoClient.close();
 		super.finalize();
 	}
@@ -187,6 +244,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		entityAttributesCollection = database.getCollection("entity_attributes");
 		locks = database.getCollection("locks");
 		isConnected = true;
+		entityAttributesBulkWriter = new BulkWriter(entityAttributesCollection);
 
 		updateCache("");
 	}
@@ -346,7 +404,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 			// Save attributes.
 			// Fail if any insert fails.
 			try {
-				entityAttributesCollection.insertMany(attributes,new InsertManyOptions().ordered(false));
+				entityAttributesBulkWriter.write(attributes);
 			} catch (MongoBulkWriteException ex) {
 				logger.debug(ex.getMessage()); 
 			}
@@ -364,7 +422,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		return doc;
 	}
 
-
+	
 	private String createHash(String type) {
 		try {
 			MessageDigest md = MessageDigest.getInstance("MD5");
@@ -549,6 +607,11 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 */
 	private BsonArray createBsonGeoCoordinate(GeospatialPosition gp) {
 		return new BsonArray(Arrays.asList(new BsonDouble(gp.getLongitude()), new BsonDouble(gp.getLatitude())));
+	}
+
+
+	public BulkWriter getBulkWriter() {
+		return entityAttributesBulkWriter;
 	}
 
 }
