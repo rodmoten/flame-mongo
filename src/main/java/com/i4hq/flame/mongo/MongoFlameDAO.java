@@ -118,10 +118,10 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		private void flush() {
 			try {				
 				collection.insertMany(buffer, insertManyOptions);
-				buffer = new LinkedList<>();
 			} catch (MongoBulkWriteException ex) {
 				logger.debug(ex.getMessage()); 
 			} finally {
+				buffer = new LinkedList<>();
 				lastWrite = System.currentTimeMillis();
 			}
 		}
