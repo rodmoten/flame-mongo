@@ -96,6 +96,7 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		public BulkWriter(MongoCollection<Document> collection) {
 			this.collection = collection;
 			logger.info("MONGO_FLAME_BULK_WRITE_WAITTIME = {}", waitTimeBeforeFlush);
+			logger.info("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD = {}", bufferWriteThreshold);
 		}
 
 		/**
