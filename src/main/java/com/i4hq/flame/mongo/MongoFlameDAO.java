@@ -478,7 +478,9 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 			Document doc = new Document();
 			AttributeType attributeType = attribute.getValue().getType();
 			Object attributeValue = attributeType.convertToJava(attribute.getValue().getValue());
-			doc.append(ID_FIELD, createAttributeId(attributeValue, attributePathName, entityIdInBytes));
+			final String attributeId = createAttributeId(attributeValue, attributePathName, entityIdInBytes);
+			doc.append(ID_FIELD, attributeId);
+			logger.debug("ID of {} is {}", logger.isDebugEnabled() ? String.format("%s:%s=%s", entity.getId(), attributePathName, attribute.getValue()) : null, attributeId);
 			doc.append(VALUE_FIELD, attributeValue);
 			doc.append(TYPE_FIELD, attributeType.toString());
 			doc.append(ENTITY_ID_FIELD, entity.getId());
