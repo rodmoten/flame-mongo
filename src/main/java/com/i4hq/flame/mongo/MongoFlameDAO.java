@@ -107,23 +107,32 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		 */
 		public boolean write(List<Document> docs) {
 			buffer.addAll(docs);
-			return flush();
+			return insertMany();
 
 		}
 
-		private boolean flush() {
+		private boolean insertMany() {
 			if (buffer.size() > bufferWriteThreshold || System.currentTimeMillis() - lastWrite > waitTimeBeforeFlush){
-				try {				
-					collection.insertMany(buffer, insertManyOptions);
-				} catch (MongoBulkWriteException ex) {
-					logger.debug(ex.getMessage()); 
-				} finally {
-					buffer = new LinkedList<>();
-					lastWrite = System.currentTimeMillis();
-				}
+				flush(); 
+				buffer = new LinkedList<>();
+				lastWrite = System.currentTimeMillis();
 				return true;
 			}
 			return false;
+		}
+
+		
+		public void flush() {
+			try {				
+				collection.insertMany(buffer, insertManyOptions);
+			} catch (MongoBulkWriteException ex) {
+				logger.debug(ex.getMessage()); 
+			}
+		}
+
+		@Override
+		protected void finalize() throws Throwable {
+			close();
 		}
 
 		public void setBufferWriteThreshold(int bufferWriteThreshold) {
@@ -133,8 +142,13 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 
 		public boolean write(Document doc) {
 			buffer.add(doc);
-			return flush();
+			return insertMany();
 
+		}
+
+		public void close() {
+			flush();
+			
 		}
 
 	}
@@ -235,15 +249,18 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	 */
 	@Override
 	protected void finalize() throws Throwable {
-		for(BulkWriter writer : bulkWriters) {
-			if (writer != null) {
-				writer.flush();
-			}
-		}
-		mongoClient.close();
+		close();
 		super.finalize();
 	}
 
+	public void close() {
+		for(BulkWriter writer : bulkWriters) {
+			if (writer != null) {
+				writer.close();
+			}
+		}
+		mongoClient.close();
+	}
 
 	private synchronized void init() {
 		if (isConnected) {
@@ -631,6 +648,12 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 
 
+	}
+
+	public void flush() {
+		for (BulkWriter writer : bulkWriters) {
+			writer.flush();
+		}
 	}
 
 }
