@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.i4hq.flame.core.AttributeExpression;
-import com.i4hq.flame.core.AttributeIdFactory;
 import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
@@ -48,7 +47,7 @@ import com.mongodb.client.model.Updates;
  * @author rmoten
  *
  */
-public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
+public class MongoFlameDAO implements FlameEntityDAO {
 
 	private static Logger logger = LoggerFactory.getLogger(MongoFlameDAO.class);
 
@@ -56,6 +55,12 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	private static final String VALUE_FIELD = "value";
 	private static final String TYPE_EXPR_FIELD = "type_expr";
 
+	private static final String TS_FIELD = "ts";
+	private static final String ID_FIELD = "_id";
+	public static final String LOCATION_FIELD = "loc";
+	private static final String CONCEPT_FIELD = "concepts";
+
+	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
 
 
@@ -208,32 +213,18 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 	}
 
 
-	private static final String STATE_FIELD = "state";
-	private static final String ATTRIBUTE_NAMES_COLLECTION = "attribute_names";
-	private static final String TS_FIELD = "ts";
-	private static final String NAME_FIELD = "name";
-	private static final String ID_FIELD = "_id";
-	public static final String LOCATION_FIELD = "loc";
-	private static final String CONCEPT_FIELD = "concepts";
-
-	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static MongoFlameDAO instance = new MongoFlameDAO();
 
 	public static MongoFlameDAO getInstance() {
 		return instance;
 	}
 
-	private Map<String, Long> attributeIds = new HashMap<>();
 	private boolean isConnected = false;
 	private MongoClient mongoClient;
-	private MongoCollection<Document> attributesCollection;
-	private MongoCollection<Document> locks;
 	private MongoCollection<Document> typesCollection;
 	private MongoCollection<Document> entitiesCollection;
 	private MongoCollection<Document> entityAttributesCollection;
 
-	private int maxCacheSize = 1024 * 100;
-	private long lastCacheUpdate = 0;
 	private BulkWriter[] bulkWriters = new BulkWriter[3];
 	final private int entityAttributesBulkWriter = 0;
 	final private int entityBulkWriter = 1;
@@ -268,16 +259,13 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 		mongoClient = new MongoClient(System.getProperty("mongo.host", "localhost"));
 		final MongoDatabase database = mongoClient.getDatabase(System.getProperty("mongo.db", "flame"));
-		attributesCollection = database.getCollection(ATTRIBUTE_NAMES_COLLECTION);
 		entitiesCollection = database.getCollection("entities");
 		typesCollection = database.getCollection("types");
 		entityAttributesCollection = database.getCollection("entity_attributes");
-		locks = database.getCollection("locks");
 		isConnected = true;
 		bulkWriters[entityAttributesBulkWriter] = new BulkWriter(entityAttributesCollection);
 		bulkWriters[entityBulkWriter] = new BulkWriter(entitiesCollection);
 		bulkWriters[typesBulkWriter] = new BulkWriter(typesCollection);
-		updateCache("");
 	}
 
 	protected boolean connect() {
@@ -286,116 +274,6 @@ public class MongoFlameDAO implements AttributeIdFactory, FlameEntityDAO {
 		}
 		init();
 		return isConnected;
-	}
-
-	/* (non-Javadoc)
-	 * @see com.i4hq.flame.AttributeIdFactory#getAttributeId(java.lang.String)
-	 */
-	@Override
-	public long getAttributeId(String attributeName) {
-		Long idOfAttribute = attributeIds.get(attributeName);
-		if (idOfAttribute != null) {
-			return idOfAttribute;
-		}
-		int numOfAttempts = 0;
-		do {
-			numOfAttempts++;
-			// Update the caches with the latest from centralized store including the one we are looking for.
-			updateCache(attributeName);
-
-			// Check if the ID is in the cache.
-			idOfAttribute = attributeIds.get(attributeName);
-			if (idOfAttribute != null) {
-				if (numOfAttempts > 1) {
-					logger.warn("Using {} for attribute {}", idOfAttribute, attributeName);
-				}
-				return idOfAttribute;
-			}
-
-			// Obtain exclusive access to the attribute names collection. 
-			lockAttributeStore();
-			try {
-				// Make the ID the total number of attributes plus 1.
-				idOfAttribute = attributesCollection.count() +1;
-
-				// Write the new ID to the store.
-				attributesCollection.insertOne(new Document().append(ID_FIELD, idOfAttribute).append(NAME_FIELD, attributeName).append(TS_FIELD, System.currentTimeMillis()));
-
-				// update the cache 
-				attributeIds.put(attributeName, idOfAttribute);
-			} catch (com.mongodb.MongoWriteException ex) {
-				logger.warn("Attempt " + numOfAttempts + ": Error writing attribute " + attributeName);
-				idOfAttribute = null;
-
-			}finally {
-				unlockAttributeStore();
-			}
-		} while(idOfAttribute == null);
-
-		return idOfAttribute;
-	}
-
-	/**
-	 * Acquire the lock for the attribute names store.
-	 */
-	private void lockAttributeStore() {
-		// Use find and update atomic
-
-		while (null != locks.findOneAndUpdate(Filters.and(Filters.eq(ID_FIELD, ATTRIBUTE_NAMES_COLLECTION), Filters.eq(STATE_FIELD,false)), Updates.set(STATE_FIELD, true))) {
-			try {
-				Thread.sleep(1);
-			} catch (InterruptedException e) {
-				// Ignore the interruption.
-			}
-		}
-	}
-
-	/**
-	 * Release the lock for the attribute names store.
-	 */
-	private void unlockAttributeStore() {
-		locks.findOneAndUpdate(Filters.eq(ID_FIELD, ATTRIBUTE_NAMES_COLLECTION), Updates.set(STATE_FIELD, false));
-
-	}
-
-	/**
-	 * This method updates the cache of attribute IDs with the ID of the given attribute, if it exists, and the last N added since the last cache update. 
-	 * N is determined based on whether the cache is empty or not. If the cache is empty, then N is the maximum cache size. If the cache is not empty N is 10% of the maximum cache size.
-	 * @param attributeName
-	 */
-	protected synchronized void updateCache(final String attributeName) {
-		int numberToFetch = maxCacheSize; //attributeIds.isEmpty() ? maxCacheSize : (int) (maxCacheSize * 0.10);
-		connect();
-
-		// We want to update the cache with a specific attribute name and all other new attributes added since we last updated the cache.
-		// This requires two queries if we want to limit the number of results returned, one to get the newly added attribute names and one to get the specific attribute name.
-		// It is possible the specific attribute name will be in the results for the newly added attributes.
-		// Therefore, we only do the second query if the specific attribute name isn't included in the results.
-		final Map<String, Long> cachedIds = this.attributeIds;
-
-		// Use this to indicate whether the given attribute name was returned in the results.
-		final ValueRef<Boolean> notInLastUpdateResults = new ValueRef<>(false);
-		Consumer<? super Document> action = new Consumer<Document>(){
-
-			@Override
-			public void accept(Document t) {
-				long id = t.getLong(ID_FIELD);
-				String name = t.getString(NAME_FIELD);
-				cachedIds.put(name, id);
-				lastCacheUpdate = System.currentTimeMillis();
-				if (attributeName.equals(name)) {
-					notInLastUpdateResults.setValue(true);
-				}
-			}			
-		};
-
-		Bson attributeNameSinceLastCacheUpdate = Filters.gte(TS_FIELD, lastCacheUpdate);
-		attributesCollection.find(attributeNameSinceLastCacheUpdate).limit(numberToFetch).forEach(action);
-
-		if (notInLastUpdateResults.getValue()){
-			attributesCollection.find(Filters.eq(NAME_FIELD, attributeName)).limit(numberToFetch).forEach(action);
-		}
-
 	}
 
 
