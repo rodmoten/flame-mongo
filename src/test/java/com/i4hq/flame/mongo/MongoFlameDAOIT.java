@@ -46,7 +46,7 @@ public class MongoFlameDAOIT {
 
 	private FlameEntity readEntityFromFile(final String filePath) throws FileNotFoundException, IOException {
 		StringBuilder jsonText = readJsonFromFile(filePath);
-		FlameEntity entity = FlameEntityFactory.createFromJson(GuidEntityIdFactory.getInstance(), dao, jsonText.toString());
+		FlameEntity entity = FlameEntityFactory.createFromJson(GuidEntityIdFactory.getInstance(), jsonText.toString());
 		return entity;
 	}
 	
