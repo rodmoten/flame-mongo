@@ -8,5 +8,4 @@ db.entity_attributes.createIndex({reference : 1});
 db.entity_attributes.createIndex({type : 1, value : 1});
 db.entities.createIndex({type:1});
 db.entities.createIndex({"loc" : "2dsphere"});
-
 EOF
