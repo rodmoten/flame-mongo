@@ -62,6 +62,14 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
 
+	private static final int MAX_MONGO_KEY_SIZE = 1024;
+
+	private static final String LONG_STRING_FIELD = "orig_value";
+
+	private static final String REFERENCE_FIELD = "ref";
+
+	private static final String TEXT_FIELD = "text";
+
 
 	private final class AddAttributeToEntityAction implements Consumer<Document> {
 		private final Map<String, FlameEntity> resultEntities;
@@ -125,7 +133,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			return false;
 		}
 
-		
+
 		public void flush() {
 			try {				
 				collection.insertMany(buffer, insertManyOptions);
@@ -152,7 +160,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		public void close() {
 			flush();
-			
+
 		}
 
 	}
@@ -212,10 +220,10 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 
-	private static MongoFlameDAO instance = new MongoFlameDAO();
+	//private static MongoFlameDAO instance = new MongoFlameDAO();
 
 	public static MongoFlameDAO getInstance() {
-		return instance;
+		return new MongoFlameDAO();
 	}
 
 	private boolean isConnected = false;
@@ -377,25 +385,78 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		byte[] entityIdInBytes = entity.getId().getBytes();
 
 		// Create a document for each attribute.
-		for (Entry<String, AttributeValue> attribute : entity.getAttributes()){
-			final String attributePathName = attribute.getKey();
-
-			Document doc = new Document();
-			AttributeType attributeType = attribute.getValue().getType();
-			Object attributeValue = attributeType.convertToJava(attribute.getValue().getValue());
-			final String attributeId = createAttributeId(attributeValue, attributePathName, entityIdInBytes);
-			doc.append(ID_FIELD, attributeId);
-			logger.debug("ID of {} is {}", logger.isDebugEnabled() ? String.format("%s:%s=%s", entity.getId(), attributePathName, attribute.getValue()) : null, attributeId);
-			doc.append(VALUE_FIELD, attributeValue);
-			doc.append(TYPE_FIELD, attributeType.toString());
-			doc.append(ENTITY_ID_FIELD, entity.getId());
-			doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
-			doc.append(TS_FIELD, System.currentTimeMillis());
-			docs.add(doc);
+		for (Entry<String, List<AttributeValue>> attributes : entity.getAttributes()){
+			final List<AttributeValue> values = attributes.getValue();
+			if (values == null) {
+				continue;
+			}
+			for (AttributeValue attribute : values){
+				Document doc = new Document();
+				addAttributeColumns(doc, entityIdInBytes, attributes.getKey(), attribute);
+				doc.append(ENTITY_ID_FIELD, entity.getId());
+				doc.append(TS_FIELD, System.currentTimeMillis());
+				docs.add(doc);
+			}
 		}
 
 		return docs;
 	}
+	private void addAttributeColumns(Document doc, byte[] entityIdInBytes, String attributePathName, AttributeValue attribute) {
+
+		AttributeType attributeType = attribute.getType();
+		String value = attribute.getValue();
+		final String attributeId = createAttributeId(value, attributePathName, entityIdInBytes);
+
+		if (attributeType == AttributeType.REFERENCE){
+			addToIndexableField(doc, REFERENCE_FIELD, value);	
+			value = "...";
+		} else if (attributeType == AttributeType.STRING && containsSpace(value)){
+			doc.append(TEXT_FIELD, value);
+			// If the string is too long, then ellide it. Since is has been added as a text field.
+			value = isLongString(value) ? "..." : value;
+		}
+		// We will ellide long STRING value  because MongoDB cannot index them. 
+		// long STRING values to TEXT. We 
+		doc.append(ID_FIELD, attributeId);
+		doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
+		doc.append(TYPE_FIELD, attributeType.toString());
+		addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
+	}
+
+	private boolean containsSpace(String value) {
+		if (value == null){
+			return false;
+		}
+		int len = value.length();
+		for (int i = 0; i < len; i++){
+			if (value.charAt(i) == ' '){
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+	private void addToIndexableField(Document doc, String fieldName, Object v){
+		if (!(v instanceof String)){
+			doc.append(fieldName, v);
+			return;
+		}
+		String s = (String) v;
+
+		if (!isLongString(s)){
+			doc.append(fieldName, s);
+		} else {
+			doc.append(fieldName, "...");
+			doc.append(LONG_STRING_FIELD, s);
+		}
+	}
+
+	private boolean isLongString(String s){
+		return s != null && s.length() / 2 >= MAX_MONGO_KEY_SIZE;
+	}
+
+
 	private void rollbackSave(SaveTransactionStep step, FlameEntity entity) {
 		switch (step) {
 		case SAVED_TO_ENTITIES_COLLECTION:

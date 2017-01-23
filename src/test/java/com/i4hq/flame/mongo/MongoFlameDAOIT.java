@@ -2,23 +2,34 @@ package com.i4hq.flame.mongo;
 
 import static org.junit.Assert.assertEquals;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map.Entry;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GuidEntityIdFactory;
+import com.mongodb.MongoClient;
 
 public class MongoFlameDAOIT {
 
-	private MongoFlameDAO dao = MongoFlameDAO.getInstance();
+	private MongoFlameDAO dao;
 	
+	@Before
+	public void setUp() throws Exception {
+		MongoClient mongoClient = new MongoClient(System.getProperty("mongo.host", "localhost"));
+		mongoClient.dropDatabase("flame");
+		mongoClient.close();
+		dao = MongoFlameDAO.getInstance();
+	}
 	
 	@Test
 	public void testSaveEntity_unbufferedWrites() throws Throwable {
@@ -35,9 +46,9 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
 		String expectedType = entity.getType();
 		assertEquals("type",expectedType, retrievedEntity.getType());
-		for (Entry<String, AttributeValue> expectedEntry : entity.getAttributes()) {
+		for (Entry<String, List<AttributeValue>> expectedEntry : entity.getAttributes()) {
 			String expectedAttributeName = expectedEntry.getKey();
-			AttributeValue expectedAttributeValue = expectedEntry.getValue();
+			AttributeValue expectedAttributeValue = expectedEntry.getValue().get(0);
 			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
@@ -72,9 +83,9 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
 		String expectedType = entity2.getType();
 		assertEquals("type",expectedType, retrievedEntity.getType());
-		for (Entry<String, AttributeValue> expectedEntry : entity2.getAttributes()) {
+		for (Entry<String, List<AttributeValue>> expectedEntry : entity2.getAttributes()) {
 			String expectedAttributeName = expectedEntry.getKey();
-			AttributeValue expectedAttributeValue = expectedEntry.getValue();
+			AttributeValue expectedAttributeValue = expectedEntry.getValue().get(0);
 			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
