@@ -2,7 +2,6 @@ package com.i4hq.flame.mongo;
 
 import static org.junit.Assert.assertEquals;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
