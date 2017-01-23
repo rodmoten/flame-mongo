@@ -34,6 +34,7 @@ import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
 import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GeospatialPosition;
+import com.i4hq.flame.core.MetadataItem;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoWriteException;
@@ -62,7 +63,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private static final String ENTITY_ID_FIELD = "entity_id";
 	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
 
-	private static final int MAX_MONGO_KEY_SIZE = 1024;
+	private static final int MAX_MONGO_KEY_SIZE = 256;
 
 	private static final String LONG_STRING_FIELD = "orig_value";
 
@@ -204,7 +205,17 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param t
 	 */
 	private void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
-		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
+		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)),
+				getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+	}
+
+	private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
+		MetadataItem[] metadata = new MetadataItem[3];
+		metadata[0] = new MetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
+		metadata[1] = new MetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
+		metadata[2] = new MetadataItem(LONG_STRING_FIELD, t.getString(LONG_STRING_FIELD));	
+
+		return metadata;
 	}
 
 	/**
@@ -409,18 +420,19 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		if (attributeType == AttributeType.REFERENCE){
 			addToIndexableField(doc, REFERENCE_FIELD, value);	
-			value = "...";
+			doc.append(VALUE_FIELD, "...");
 		} else if (attributeType == AttributeType.STRING && containsSpace(value)){
 			doc.append(TEXT_FIELD, value);
 			// If the string is too long, then ellide it. Since is has been added as a text field.
-			value = isLongString(value) ? "..." : value;
+			doc.append(VALUE_FIELD, value = isLongString(value) ? "..." : value);
+		} else {
+			addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
 		}
 		// We will ellide long STRING value  because MongoDB cannot index them. 
 		// long STRING values to TEXT. We 
 		doc.append(ID_FIELD, attributeId);
 		doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
 		doc.append(TYPE_FIELD, attributeType.toString());
-		addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
 	}
 
 	private boolean containsSpace(String value) {
@@ -453,7 +465,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 	private boolean isLongString(String s){
-		return s != null && s.length() / 2 >= MAX_MONGO_KEY_SIZE;
+		return s != null && s.length() >= MAX_MONGO_KEY_SIZE;
 	}
 
 
