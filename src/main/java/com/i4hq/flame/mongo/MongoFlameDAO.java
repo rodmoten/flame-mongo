@@ -35,6 +35,7 @@ import com.i4hq.flame.core.FlameEntityDAO;
 import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GeospatialPosition;
 import com.i4hq.flame.core.MetadataItem;
+import com.mongodb.BasicDBObject;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoWriteException;
@@ -42,6 +43,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.InsertManyOptions;
+import com.mongodb.client.model.UpdateOptions;
 
 /**
  * @author rmoten
@@ -242,14 +244,23 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private MongoCollection<Document> typesCollection;
 	private MongoCollection<Document> entitiesCollection;
 	private MongoCollection<Document> entityAttributesCollection;
+	private MongoCollection<Document> referenceCollection;
+	private MongoCollection<Document> geoCollection;
+	private final UpdateOptions upsertOption;
 
-	private BulkWriter[] bulkWriters = new BulkWriter[3];
+	private BulkWriter[] bulkWriters = new BulkWriter[4];
 	final private int entityAttributesBulkWriter = 0;
 	final private int entityBulkWriter = 1;
 	final private int typesBulkWriter = 2;
+	final private int referenceBulkWriter = 3;
+
+	private MongoDatabase database;
+
 
 	private MongoFlameDAO () {
 		init();
+		upsertOption = new UpdateOptions();
+		upsertOption.upsert(true);
 	}	
 
 
@@ -276,14 +287,17 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			return;
 		}
 		mongoClient = new MongoClient(System.getProperty("mongo.host", "localhost"));
-		final MongoDatabase database = mongoClient.getDatabase(System.getProperty("mongo.db", "flame"));
+		database = mongoClient.getDatabase(System.getProperty("mongo.db", "flame"));
 		entitiesCollection = database.getCollection("entities");
 		typesCollection = database.getCollection("types");
-		entityAttributesCollection = database.getCollection("entity_attributes");
+		entityAttributesCollection = database.getCollection("attributes");
+		referenceCollection = database.getCollection("references");
+		geoCollection = database.getCollection("geos");
 		isConnected = true;
 		bulkWriters[entityAttributesBulkWriter] = new BulkWriter(entityAttributesCollection);
 		bulkWriters[entityBulkWriter] = new BulkWriter(entitiesCollection);
 		bulkWriters[typesBulkWriter] = new BulkWriter(typesCollection);
+		bulkWriters[referenceBulkWriter] = new BulkWriter(referenceCollection);
 	}
 
 	protected boolean connect() {
@@ -309,7 +323,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 				entitiesDocument.append(LOCATION_FIELD, toGeoJsonPoint(entity.getGeospatialPosition()));
 			}
 			Document typesDocument = new Document(ID_FIELD, typeHash).append(TYPE_EXPR_FIELD, entity.getType());
-			List<Document> attributes = toEntityAttributesDocuments(entity);
+			List<AttributeDocument> attributes = toEntityAttributesDocuments(entity);
 
 			// Save type. No need to roll this back. May through an exception because of a duplicate type
 			try {
@@ -331,7 +345,18 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			// Save attributes.
 			// Fail if any insert fails.
 			try {
-				bulkWriters[entityAttributesBulkWriter].write(attributes);
+				for (AttributeDocument ad : attributes){
+					switch(ad.getDocType()) {
+					case REFERENCE: 
+						bulkWriters[referenceBulkWriter].write(ad.getDecoratedDoc());
+						break;
+					case GEO:
+						this.geoCollection.updateOne(Filters.eq(ENTITY_ID_FIELD, entity.getId()), ad.getDecoratedDoc(), upsertOption);
+						break;
+					default:
+						bulkWriters[entityAttributesBulkWriter].write(ad.getDecoratedDoc());
+					}
+				}
 			} catch (MongoBulkWriteException ex) {
 				logger.debug(ex.getMessage()); 
 			}
@@ -391,8 +416,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param idOfEntityType - the ID of the type of the entity.
 	 * @return
 	 */
-	private List<Document> toEntityAttributesDocuments(FlameEntity entity){
-		List<Document> docs = new ArrayList<>(entity.size());
+	private List<AttributeDocument> toEntityAttributesDocuments(FlameEntity entity){
+		List<AttributeDocument> docs = new ArrayList<>(entity.size());
 		byte[] entityIdInBytes = entity.getId().getBytes();
 
 		// Create a document for each attribute.
@@ -402,8 +427,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 				continue;
 			}
 			for (AttributeValue attribute : values){
-				Document doc = new Document();
-				addAttributeColumns(doc, entityIdInBytes, attributes.getKey(), attribute);
+				AttributeDocument doc = addAttributeColumns(entityIdInBytes, attributes.getKey(), attribute);
 				doc.append(ENTITY_ID_FIELD, entity.getId());
 				doc.append(TS_FIELD, System.currentTimeMillis());
 				docs.add(doc);
@@ -412,20 +436,25 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		return docs;
 	}
-	private void addAttributeColumns(Document doc, byte[] entityIdInBytes, String attributePathName, AttributeValue attribute) {
+	private AttributeDocument addAttributeColumns(byte[] entityIdInBytes, String attributePathName, AttributeValue attribute) {
 
 		AttributeType attributeType = attribute.getType();
 		String value = attribute.getValue();
 		final String attributeId = createAttributeId(value, attributePathName, entityIdInBytes);
-
+		AttributeDocument doc =  null;
 		if (attributeType == AttributeType.REFERENCE){
-			addToIndexableField(doc, REFERENCE_FIELD, value);	
-			doc.append(VALUE_FIELD, "...");
+			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.REFERENCE);
+			addToIndexableField(doc, VALUE_FIELD, value);	
 		} else if (attributeType == AttributeType.STRING && containsSpace(value)){
+			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.DEFAULT);
 			doc.append(TEXT_FIELD, value);
 			// If the string is too long, then ellide it. Since is has been added as a text field.
 			doc.append(VALUE_FIELD, value = isLongString(value) ? "..." : value);
-		} else {
+		} else if (attributeType == AttributeType.LATITUDE || attributeType == AttributeType.LONGITUDE) {
+			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.GEO);
+			addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
+		}else {
+			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.DEFAULT);
 			addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
 		}
 		// We will ellide long STRING value  because MongoDB cannot index them. 
@@ -433,6 +462,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		doc.append(ID_FIELD, attributeId);
 		doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
 		doc.append(TYPE_FIELD, attributeType.toString());
+
+		return doc;
 	}
 
 	private boolean containsSpace(String value) {
@@ -604,6 +635,53 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		for (BulkWriter writer : bulkWriters) {
 			writer.flush();
 		}
+	}
+
+	@Override
+	public void updateEntitiesWithGeoLoctions(Collection<String> entityIds) {
+		int maxBatchSize = 1024;
+		StringBuilder entityIdBuffer = null;
+		int bufferSize = 0;
+		int count = 0;
+		for (String entityId : entityIds) {
+			// Batch the entity IDs 
+			if (bufferSize == 0) {
+				entityIdBuffer = new StringBuilder(""); 
+			}
+			if (count > 0) {
+				entityIdBuffer.append(',');
+			}
+			entityIdBuffer.append('"');
+			entityIdBuffer.append(entityId);
+			entityIdBuffer.append('"');
+
+			count++;
+			bufferSize++;
+			// The buffer is full. So now do the update.
+			if (bufferSize == maxBatchSize) {
+				// Do the update on the server side
+				updateGeoLocations(entityIdBuffer);
+				// Execute the query
+				count = 0;
+				bufferSize = 0;
+			}
+
+
+		}
+		if (bufferSize > 0){
+			updateGeoLocations(entityIdBuffer);
+		}
+	}
+
+final static String UPDATE_GEO_TEMPLATE = "function() { return db.geos.find({ entity_id: { $in: [%s] } }, { entity_id: 1, value: 1, type: 1 }).forEach(function(doc) "
+		+ "{ db.entities.update({ _id: doc._id }, { $set: { loc: { type: 'Point', coordinates: [doc.latitude, doc.longitude] } } }, { upsert: false }); }) }";
+
+	private void updateGeoLocations(StringBuilder entityIdBuffer) {
+		final BasicDBObject command = new BasicDBObject();
+		final String jsCode = String.format(UPDATE_GEO_TEMPLATE, entityIdBuffer.toString());
+		command.put("eval", jsCode);
+		Document result = database.runCommand(command);
+		logger.debug("{}", result);
 	}
 
 }
