@@ -32,7 +32,6 @@ import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
-import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GeospatialPosition;
 import com.i4hq.flame.core.MetadataItem;
 import com.mongodb.BasicDBObject;
@@ -42,7 +41,6 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.InsertManyOptions;
 import com.mongodb.client.model.UpdateOptions;
 
 /**
@@ -51,18 +49,19 @@ import com.mongodb.client.model.UpdateOptions;
  */
 public class MongoFlameDAO implements FlameEntityDAO {
 
-	private static Logger logger = LoggerFactory.getLogger(MongoFlameDAO.class);
+	static Logger logger = LoggerFactory.getLogger(MongoFlameDAO.class);
 
 	private static final String TYPE_FIELD = "type";
 	private static final String VALUE_FIELD = "value";
 	private static final String TYPE_EXPR_FIELD = "type_expr";
 
 	private static final String TS_FIELD = "ts";
-	private static final String ID_FIELD = "_id";
+	static final String ID_FIELD = "_id";
 	public static final String LOCATION_FIELD = "loc";
-	private static final String CONCEPT_FIELD = "concepts";
+	static final String LATITUDE_FIELD = "latitude";
+	static final String LONGITUDE_FIELD = "longitude";
 
-	private static final String ENTITY_ID_FIELD = "entity_id";
+	static final String ENTITY_ID_FIELD = "entity_id";
 	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
 
 	private static final int MAX_MONGO_KEY_SIZE = 256;
@@ -74,144 +73,16 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private static final String TEXT_FIELD = "text";
 
 
-	private final class AddAttributeToEntityAction implements Consumer<Document> {
-		private final Map<String, FlameEntity> resultEntities;
-
-		private AddAttributeToEntityAction(Map<String, FlameEntity> resultEntities) {
-			this.resultEntities = resultEntities;
-		}
-
-		@Override
-		public void accept(Document t) {
-			logger.debug("Found doc: {}", t);
-			String entityId = t.getString(ID_FIELD);
-			FlameEntity entity = resultEntities.get(entityId);
-			if (entity == null){
-				entity = FlameEntityFactory.createEntity(entityId);
-				resultEntities.put(entityId, entity);
-			}
-			addAttributeInJsonToEntity(entity, t);
-		}
-
-	}
-
-	public class BulkWriter {
-
-		private long lastWrite = System.currentTimeMillis();
-		private long waitTimeBeforeFlush;
-		/**
-		 * The minimum number of documents to keep in memory before sending to the server.
-		 */
-		private int bufferWriteThreshold;
-
-		private final InsertManyOptions insertManyOptions = new InsertManyOptions().ordered(false);
-		private List<Document> buffer = new LinkedList<>();
-		private final MongoCollection<Document> collection;
-
-		public BulkWriter(MongoCollection<Document> collection) {
-			this.collection = collection;
-			setBufferWriteThreshold(Integer.parseInt(System.getProperty("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD", "1000")));
-			logger.info("MONGO_FLAME_BULK_WRITE_WAITTIME = {}", waitTimeBeforeFlush);
-			logger.info("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD = {}", bufferWriteThreshold);
-		}
-
-		/**
-		 * @param collection
-		 * @param docs
-		 * @return Returns true if and only if it performed the write.
-		 */
-		public boolean write(List<Document> docs) {
-			buffer.addAll(docs);
-			return insertMany();
-
-		}
-
-		private boolean insertMany() {
-			if (buffer.size() > bufferWriteThreshold || System.currentTimeMillis() - lastWrite > waitTimeBeforeFlush){
-				flush(); 
-				buffer = new LinkedList<>();
-				lastWrite = System.currentTimeMillis();
-				return true;
-			}
-			return false;
-		}
-
-
-		public void flush() {
-			try {				
-				collection.insertMany(buffer, insertManyOptions);
-			} catch (MongoBulkWriteException ex) {
-				logger.debug(ex.getMessage()); 
-			}
-		}
-
-		@Override
-		protected void finalize() throws Throwable {
-			close();
-		}
-
-		public void setBufferWriteThreshold(int bufferWriteThreshold) {
-			this.bufferWriteThreshold = bufferWriteThreshold;
-			waitTimeBeforeFlush = this.bufferWriteThreshold + (long) (this.bufferWriteThreshold * 0.10);
-		}
-
-		public boolean write(Document doc) {
-			buffer.add(doc);
-			return insertMany();
-
-		}
-
-		public void close() {
-			flush();
-
-		}
-
-	}
-
-
-
-	/**
-	 * This class handle results from queries that join the entities collectiona and the entity_attributes collection, such as a search for entities within a specific region.
-	 * @author rmoten
-	 *
-	 */
-	private final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
-		private final Map<String, FlameEntity> resultEntities;
-		private final String attributesFieldName;
-
-		private AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {
-			this.resultEntities = resultEntities;
-			this.attributesFieldName = attributesFieldName;
-		}
-
-		@Override
-		public void accept(Document t) {
-			logger.debug("Found doc: {}", t);
-			String entityId = t.getString(ID_FIELD);
-			FlameEntity entity = resultEntities.get(entityId);
-			if (entity == null){
-				entity = FlameEntityFactory.createEntity(entityId);
-				resultEntities.put(entityId, entity);
-			}
-			// Get the attributes of the entity
-			@SuppressWarnings("unchecked")
-			List<Document> attributes = (List<Document>) t.get(attributesFieldName);
-			for (Document attribute : attributes){
-				addAttributeInJsonToEntity(entity, attribute);
-			}
-		}
-	}
-
-	/**
+ /**
 	 * @param entity
 	 * @param t
 	 */
-	private void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
+	static void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
 		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)),
 				getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
 	}
 
-	private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
+	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
 		MetadataItem[] metadata = new MetadataItem[3];
 		metadata[0] = new MetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
 		metadata[1] = new MetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
@@ -351,7 +222,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 						bulkWriters[referenceBulkWriter].write(ad.getDecoratedDoc());
 						break;
 					case GEO:
-						this.geoCollection.updateOne(Filters.eq(ENTITY_ID_FIELD, entity.getId()), ad.getDecoratedDoc(), upsertOption);
+						this.geoCollection.updateOne(Filters.eq(ENTITY_ID_FIELD, entity.getId()), new Document ("$set", ad.getDecoratedDoc()), upsertOption);
 						break;
 					default:
 						bulkWriters[entityAttributesBulkWriter].write(ad.getDecoratedDoc());
@@ -440,7 +311,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		AttributeType attributeType = attribute.getType();
 		String value = attribute.getValue();
-		final String attributeId = createAttributeId(value, attributePathName, entityIdInBytes);
+		String attributeId = createAttributeId(value, attributePathName, entityIdInBytes);
 		AttributeDocument doc =  null;
 		if (attributeType == AttributeType.REFERENCE){
 			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.REFERENCE);
@@ -452,13 +323,14 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			doc.append(VALUE_FIELD, value = isLongString(value) ? "..." : value);
 		} else if (attributeType == AttributeType.LATITUDE || attributeType == AttributeType.LONGITUDE) {
 			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.GEO);
-			addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
+			addToIndexableField(doc, attributeType == AttributeType.LATITUDE ? LATITUDE_FIELD : LONGITUDE_FIELD, attributeType.convertToJava(value));	
+			attributeId = new String(entityIdInBytes);
 		}else {
 			doc = new AttributeDocument (new Document(), AttributeDocument.AttributeDocumentType.DEFAULT);
 			addToIndexableField(doc, VALUE_FIELD, attributeType.convertToJava(value));	
 		}
-		// We will ellide long STRING value  because MongoDB cannot index them. 
-		// long STRING values to TEXT. We 
+
+		attributeId = attributeId == null ? createAttributeId(value, attributePathName, entityIdInBytes) : attributeId;
 		doc.append(ID_FIELD, attributeId);
 		doc.append(ATTRIBUTE_NAME_FIELD, attributePathName);
 		doc.append(TYPE_FIELD, attributeType.toString());
@@ -514,16 +386,24 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 	@Override
 	public FlameEntity getEntitiesById(final String id) {
-		final FlameEntity entity = FlameEntityFactory.createEntity(id);
-		Consumer<Document> addAttribute = new Consumer<Document>(){
+		final FlameEntity entity = new MongoFlameEntity(id, this);
+		String attributesFieldName = "attributes";
 
-			@Override
-			public void accept(Document t) {
-				addAttributeInJsonToEntity(entity, t);
-			}
-		};
+		BsonDocument lookup = new BsonDocument("$lookup",new BsonDocument(Arrays.asList(
+				new BsonElement("from", new BsonString("attributes")),
+				new BsonElement("localField", new BsonString("_id")),
+				new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
+				new BsonElement("as", new BsonString(attributesFieldName))
+				)));
+		BsonDocument eqEntityId = new BsonDocument(ID_FIELD, new BsonString(entity.getId()));
+		BsonDocument match = new BsonDocument("$match", eqEntityId);
 
-		entityAttributesCollection.find(Filters.eq(ENTITY_ID_FIELD, entity.getId())).forEach(addAttribute);
+		List<? extends Bson> pipelines = Arrays.asList(match, lookup);
+		final Map<String, FlameEntity> resultEntities = new HashMap<>();
+		resultEntities.put(entity.getId(), entity);
+
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName);		
+		entitiesCollection.aggregate(pipelines).forEach(addAttribute);
 
 		return entity;
 	}
@@ -577,7 +457,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		//		db.entities.aggregate([{$match: { loc: { $geoWithin: { $geometry: { type: "Polygon", coordinates: [ [ [ 20.73414993286133, 56.85886001586914 ], 
 		//		[ 20.29469680786133, 33.51984024047852 ], [ 70.91969299316406, 33.66626358032227 ], [ 63.97633743286133, 57.14605331420898 ], [ 50.00172805786133, 57.288818359375 ], 
 		//		[ 20.73414993286133, 56.85886001586914 ] ] ] } } } }}, 
-		//		{$lookup: { from:"entity_attributes", localField:"_id", foreignField: "entity_id", as: "attributes"}}])
+		//		{$lookup: { from:"attributes", localField:"_id", foreignField: "entity_id", as: "attributes"}}])
 
 		List<BsonValue> coordinates = new LinkedList<>();
 		// The first point must be the first and last in the list.
@@ -600,7 +480,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		// This is used to join the entities in the polygon to their attributes.
 		BsonDocument lookup = new BsonDocument("$lookup",new BsonDocument(Arrays.asList(
-				new BsonElement("from", new BsonString("entity_attributes")),
+				new BsonElement("from", new BsonString("attributes")),
 				new BsonElement("localField", new BsonString("_id")),
 				new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
 				new BsonElement("as", new BsonString(attributesFieldName))
@@ -673,8 +553,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		}
 	}
 
-final static String UPDATE_GEO_TEMPLATE = "function() { return db.geos.find({ entity_id: { $in: [%s] } }, { entity_id: 1, value: 1, type: 1 }).forEach(function(doc) "
-		+ "{ db.entities.update({ _id: doc._id }, { $set: { loc: { type: 'Point', coordinates: [doc.latitude, doc.longitude] } } }, { upsert: false }); }) }";
+final static String UPDATE_GEO_TEMPLATE = "function() { return db.geos.find({ entity_id: { $in: [%s] } }, { _id: 1, longitude: 1, latitude: 1 }).forEach(function(doc) "
+		+ "{ db.entities.update({ _id: doc._id }, { $set: { latitude: doc.latitude, longitude: doc.longitude, loc: { type: 'Point', coordinates: [doc.latitude, doc.longitude] } } }, { upsert: false }); }) }";
 
 	private void updateGeoLocations(StringBuilder entityIdBuffer) {
 		final BasicDBObject command = new BasicDBObject();
@@ -682,6 +562,26 @@ final static String UPDATE_GEO_TEMPLATE = "function() { return db.geos.find({ en
 		command.put("eval", jsCode);
 		Document result = database.runCommand(command);
 		logger.debug("{}", result);
+	}
+
+	 /**
+	  * Get the references of the given entity.
+	 * @param entityId
+	 * @return
+	 */
+	Map<String, String> retrieveReferences(String entityId) {
+		final Map<String, String> references = new HashMap<>();
+		referenceCollection.find(Filters.eq(ENTITY_ID_FIELD, entityId)).forEach(new Consumer<Document>(){
+
+			@Override
+			public void accept(Document t) {
+				String value = t.getString(VALUE_FIELD);
+				if ("...".equals(value)){
+					value = t.getString(LONG_STRING_FIELD);
+				}
+				references.put(t.getString(ATTRIBUTE_NAME_FIELD), value);
+			}});
+		return references;
 	}
 
 }
