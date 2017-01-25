@@ -28,6 +28,17 @@ public class MongoFlameDAOIT {
 		mongoClient.dropDatabase("flame");
 		mongoClient.close();
 		dao = MongoFlameDAO.getInstance();
+		
+		try
+        {    
+            String target = new String("src/main/bash/init-db.sh");
+            Runtime rt = Runtime.getRuntime();
+            Process proc = rt.exec(target);
+
+        } catch (Throwable t)
+        {
+            t.printStackTrace();
+        }
 	}
 	
 	@Test
