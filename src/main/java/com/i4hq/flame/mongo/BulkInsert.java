@@ -52,8 +52,10 @@ public class BulkInsert implements BulkOperation{
 
 
 	public void flush() {
-		try {				
-			collection.insertMany(buffer, insertManyOptions);
+		try {
+			if (buffer.size() > 0) {
+				collection.insertMany(buffer, insertManyOptions);
+			}
 		} catch (MongoBulkWriteException ex) {
 			MongoFlameDAO.logger.debug(ex.getMessage()); 
 		}
