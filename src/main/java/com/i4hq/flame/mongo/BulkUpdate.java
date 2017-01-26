@@ -72,7 +72,7 @@ public class BulkUpdate implements BulkOperation {
 
 	public void setBufferWriteThreshold(int bufferWriteThreshold) {
 		this.bufferWriteThreshold = bufferWriteThreshold;
-		waitTimeBeforeFlush = this.bufferWriteThreshold + (long) (this.bufferWriteThreshold * 0.10);
+		waitTimeBeforeFlush = this.bufferWriteThreshold + (long) (this.bufferWriteThreshold * 1);
 	}
 
 	/* (non-Javadoc)
