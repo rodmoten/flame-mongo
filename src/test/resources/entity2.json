@@ -1,0 +1,18 @@
+{
+  "type": 789,
+  "id": "entity2",
+  "name": "entity2",
+  "properties": {
+    "report": false,
+    "style": "font",
+    "attrs": {
+      "type": null,
+      "name": "Hector"
+    },
+    "geometry": {
+      "type": "rectange",
+      "angle": 57.052581787109375
+    }
+  }
+}
+
