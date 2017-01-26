@@ -119,11 +119,12 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private MongoCollection<Document> geoCollection;
 	private final UpdateOptions upsertOption;
 
-	private BulkWriter[] bulkWriters = new BulkWriter[4];
+	private BulkOperation[] bulkWriters = new BulkOperation[5];
 	final private int entityAttributesBulkWriter = 0;
 	final private int entityBulkWriter = 1;
 	final private int typesBulkWriter = 2;
 	final private int referenceBulkWriter = 3;
+	final private int geoBulkWriter = 4;
 
 	private MongoDatabase database;
 
@@ -145,7 +146,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 	public void close() {
-		for(BulkWriter writer : bulkWriters) {
+		for(BulkOperation writer : bulkWriters) {
 			if (writer != null) {
 				writer.close();
 			}
@@ -165,10 +166,11 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		referenceCollection = database.getCollection("references");
 		geoCollection = database.getCollection("geos");
 		isConnected = true;
-		bulkWriters[entityAttributesBulkWriter] = new BulkWriter(entityAttributesCollection);
-		bulkWriters[entityBulkWriter] = new BulkWriter(entitiesCollection);
-		bulkWriters[typesBulkWriter] = new BulkWriter(typesCollection);
-		bulkWriters[referenceBulkWriter] = new BulkWriter(referenceCollection);
+		bulkWriters[entityAttributesBulkWriter] = new BulkInsert(entityAttributesCollection);
+		bulkWriters[entityBulkWriter] = new BulkInsert(entitiesCollection);
+		bulkWriters[typesBulkWriter] = new BulkInsert(typesCollection);
+		bulkWriters[referenceBulkWriter] = new BulkInsert(referenceCollection);
+		bulkWriters[geoBulkWriter] = new BulkUpdate(geoCollection);
 	}
 
 	protected boolean connect() {
@@ -198,7 +200,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 			// Save type. No need to roll this back. May through an exception because of a duplicate type
 			try {
-				bulkWriters[typesBulkWriter].write(typesDocument);
+				((BulkInsert) bulkWriters[typesBulkWriter]).write(typesDocument);
 			} catch (MongoWriteException ex) {
 				// Assume this only occurs when the type already exists. Therefore we ignore it since different entities may have the same type.
 				logger.debug(ex.getMessage());
@@ -206,7 +208,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 			// Save to entities collection.
 			try {
-				bulkWriters[this.entityBulkWriter].write(entitiesDocument);
+				((BulkInsert) bulkWriters[this.entityBulkWriter]).write(entitiesDocument);
 				step = SaveTransactionStep.SAVED_TO_ENTITIES_COLLECTION;
 			} catch (MongoWriteException ex) {
 				// Assuming we only get this when we inserting an entity that already exists.
@@ -219,13 +221,13 @@ public class MongoFlameDAO implements FlameEntityDAO {
 				for (AttributeDocument ad : attributes){
 					switch(ad.getDocType()) {
 					case REFERENCE: 
-						bulkWriters[referenceBulkWriter].write(ad.getDecoratedDoc());
+						((BulkInsert) bulkWriters[referenceBulkWriter]).write(ad.getDecoratedDoc());
 						break;
 					case GEO:
-						this.geoCollection.updateOne(Filters.eq(ENTITY_ID_FIELD, entity.getId()), new Document ("$set", ad.getDecoratedDoc()), upsertOption);
+						((BulkUpdate) bulkWriters[referenceBulkWriter]).update(Filters.eq(ENTITY_ID_FIELD, entity.getId()), new Document ("$set", ad.getDecoratedDoc()));
 						break;
 					default:
-						bulkWriters[entityAttributesBulkWriter].write(ad.getDecoratedDoc());
+						((BulkInsert) bulkWriters[entityAttributesBulkWriter]).write(ad.getDecoratedDoc());
 					}
 				}
 			} catch (MongoBulkWriteException ex) {
@@ -504,15 +506,13 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 	public void setBufferWriteThreshold(int i) {
-		for (BulkWriter writer : bulkWriters) {
+		for (BulkOperation writer : bulkWriters) {
 			writer.setBufferWriteThreshold(i);
 		}
-
-
 	}
 
 	public void flush() {
-		for (BulkWriter writer : bulkWriters) {
+		for (BulkOperation writer : bulkWriters) {
 			writer.flush();
 		}
 	}

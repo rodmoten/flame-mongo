@@ -4,12 +4,14 @@ import java.util.LinkedList;
 import java.util.List;
 
 import org.bson.Document;
+import org.bson.conversions.Bson;
 
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.InsertManyOptions;
+import com.mongodb.client.model.UpdateOneModel;
+import com.mongodb.client.model.UpdateOptions;
 
-public class BulkWriter {
+public class BulkUpdate implements BulkOperation {
 
 	private long lastWrite = System.currentTimeMillis();
 	private long waitTimeBeforeFlush;
@@ -18,11 +20,10 @@ public class BulkWriter {
 	 */
 	private int bufferWriteThreshold;
 
-	private final InsertManyOptions insertManyOptions = new InsertManyOptions().ordered(false);
-	private List<Document> buffer = new LinkedList<>();
+	private List<UpdateOneModel<Document>> buffer = new LinkedList<>();
 	private final MongoCollection<Document> collection;
 
-	public BulkWriter(MongoCollection<Document> collection) {
+	public BulkUpdate(MongoCollection<Document> collection) {
 		this.collection = collection;
 		setBufferWriteThreshold(Integer.parseInt(System.getProperty("MONGO_FLAME_BULK_WRITE_MIN_THRESHOLD", "1000")));
 		MongoFlameDAO.logger.info("MONGO_FLAME_BULK_WRITE_WAITTIME = {}", waitTimeBeforeFlush);
@@ -34,13 +35,12 @@ public class BulkWriter {
 	 * @param docs
 	 * @return Returns true if and only if it performed the write.
 	 */
-	public boolean write(List<Document> docs) {
-		buffer.addAll(docs);
-		return insertMany();
-
+	public boolean update(final Bson filter, final Bson update) {
+		buffer.add(new UpdateOneModel<Document>(filter, update, new UpdateOptions().upsert(true)));
+		return updateMany();
 	}
 
-	private boolean insertMany() {
+	private boolean updateMany() {
 		if (buffer.size() > bufferWriteThreshold || System.currentTimeMillis() - lastWrite > waitTimeBeforeFlush){
 			flush(); 
 			buffer = new LinkedList<>();
@@ -51,9 +51,13 @@ public class BulkWriter {
 	}
 
 
+	/* (non-Javadoc)
+	 * @see com.i4hq.flame.mongo.BulkOperation#flush()
+	 */
+	@Override
 	public void flush() {
-		try {				
-			collection.insertMany(buffer, insertManyOptions);
+		try {		
+			collection.bulkWrite(buffer);
 		} catch (MongoBulkWriteException ex) {
 			MongoFlameDAO.logger.debug(ex.getMessage()); 
 		}
@@ -69,12 +73,10 @@ public class BulkWriter {
 		waitTimeBeforeFlush = this.bufferWriteThreshold + (long) (this.bufferWriteThreshold * 0.10);
 	}
 
-	public boolean write(Document doc) {
-		buffer.add(doc);
-		return insertMany();
-
-	}
-
+	/* (non-Javadoc)
+	 * @see com.i4hq.flame.mongo.BulkOperation#close()
+	 */
+	@Override
 	public void close() {
 		flush();
 
