@@ -224,7 +224,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 						((BulkInsert) bulkWriters[referenceBulkWriter]).write(ad.getDecoratedDoc());
 						break;
 					case GEO:
-						((BulkUpdate) bulkWriters[referenceBulkWriter]).update(Filters.eq(ENTITY_ID_FIELD, entity.getId()), new Document ("$set", ad.getDecoratedDoc()));
+						((BulkUpdate) bulkWriters[geoBulkWriter]).update(Filters.eq(ENTITY_ID_FIELD, entity.getId()), new Document ("$set", ad.getDecoratedDoc()));
 						break;
 					default:
 						((BulkInsert) bulkWriters[entityAttributesBulkWriter]).write(ad.getDecoratedDoc());

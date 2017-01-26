@@ -57,7 +57,9 @@ public class BulkUpdate implements BulkOperation {
 	@Override
 	public void flush() {
 		try {		
-			collection.bulkWrite(buffer);
+			if (buffer.size() > 0) {
+				collection.bulkWrite(buffer);
+			}
 		} catch (MongoBulkWriteException ex) {
 			MongoFlameDAO.logger.debug(ex.getMessage()); 
 		}
