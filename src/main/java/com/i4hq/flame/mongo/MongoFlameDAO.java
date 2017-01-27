@@ -32,7 +32,7 @@ import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
-import com.i4hq.flame.core.GeospatialPosition;
+import com.i4hq.flame.core.Geo2DPoint;
 import com.i4hq.flame.core.MetadataItem;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoBulkWriteException;
@@ -242,7 +242,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		return insertCompletedSuccessfully;
 	}
 
-	private Document toGeoJsonPoint(GeospatialPosition gp) {
+	private Document toGeoJsonPoint(Geo2DPoint gp) {
 		Document doc = Document.parse(String.format("{ type: 'Point', coordinates: [ %f, %f ] }", gp.getLongitude(), gp.getLatitude()));
 		return doc;
 	}
@@ -444,7 +444,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 
-	private Collection<FlameEntity> getAttributiesByGeospatialRegion(String attributeName, GeospatialPosition[] geospatialPositions) {
+	private Collection<FlameEntity> getAttributiesByGeospatialRegion(String attributeName, Geo2DPoint[] geospatialPositions) {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
 
 		String attributesFieldName = "attributes";
@@ -467,7 +467,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		coordinates.add(firstPosition);
 
 		for (int i = 1; i < geospatialPositions.length; i++) {
-			GeospatialPosition gp = geospatialPositions[i];
+			Geo2DPoint gp = geospatialPositions[i];
 			BsonArray p = createBsonGeoCoordinate(gp);
 			coordinates.add(p);
 		}
@@ -501,7 +501,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param gp
 	 * @return
 	 */
-	private BsonArray createBsonGeoCoordinate(GeospatialPosition gp) {
+	private BsonArray createBsonGeoCoordinate(Geo2DPoint gp) {
 		return new BsonArray(Arrays.asList(new BsonDouble(gp.getLongitude()), new BsonDouble(gp.getLatitude())));
 	}
 
