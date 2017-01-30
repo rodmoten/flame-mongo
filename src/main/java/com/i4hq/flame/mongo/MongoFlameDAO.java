@@ -554,7 +554,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	}
 
 final static String UPDATE_GEO_TEMPLATE = "function() { return db.geos.find({ entity_id: { $in: [%s] } }, { _id: 1, longitude: 1, latitude: 1 }).forEach(function(doc) "
-		+ "{ db.entities.update({ _id: doc._id }, { $set: { latitude: doc.latitude, longitude: doc.longitude, loc: { type: 'Point', coordinates: [doc.latitude, doc.longitude] } } }, { upsert: false }); }) }";
+		+ "{ db.entities.update({ _id: doc._id }, { $set: { latitude: doc.latitude, longitude: doc.longitude, loc: { type: 'Point', coordinates: [doc.longitude, doc.latitude] } } }, { upsert: false }); }) }";
 
 	private void updateGeoLocations(StringBuilder entityIdBuffer) {
 		final BasicDBObject command = new BasicDBObject();
