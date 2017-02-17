@@ -6,6 +6,8 @@ import java.util.function.Consumer;
 
 import org.bson.Document;
 
+import com.i4hq.flame.core.AttributeDecl;
+import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
 
@@ -17,10 +19,23 @@ import com.i4hq.flame.core.FlameEntityFactory;
 final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 	private final Map<String, FlameEntity> resultEntities;
 	private final String attributesFieldName;
+	private final EntityType entityType;
 
-	AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {
+	/**
+	 * @param resultEntities
+	 * @param attributesFieldName
+	 * @param entityType
+	 */
+	public AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName,
+			EntityType entityType) {
+		super();
 		this.resultEntities = resultEntities;
 		this.attributesFieldName = attributesFieldName;
+		this.entityType = entityType;
+	}
+
+	AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {
+		this(resultEntities, attributesFieldName, null);
 	}
 
 	@Override
@@ -30,18 +45,29 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 		Double longitude = t.getDouble(MongoFlameDAO.LONGITUDE_FIELD);
 		Double latitude = t.getDouble(MongoFlameDAO.LATITUDE_FIELD);
 		FlameEntity entity = resultEntities.get(entityId);
+		
+		// Get the attributes of the entity and check that it matches the target type.
+		int numOfTargetAttributes = entityType == null ? 0 : entityType.numOfAttributes();
+		boolean addAllAttributes = entityType == null;
+		int numOfMatchedAttributes = 0;
+		@SuppressWarnings("unchecked")
+		List<Document> attributes = (List<Document>) t.get(attributesFieldName);
+		for (Document attribute : attributes){
+			AttributeDecl attributeDecl = MongoFlameDAO.addAttributeInJsonToEntity(entity, attribute);
+			if (addAllAttributes || entityType.contains(attributeDecl)) {
+				numOfMatchedAttributes++;
+			}
+		}
+		if (numOfTargetAttributes > numOfMatchedAttributes){
+			return;
+		}
+		
 		if (entity == null){
 			entity = FlameEntityFactory.createEntity(entityId);
 			resultEntities.put(entityId, entity);
 		}
 		if (longitude != null && latitude != null){
 			entity.setLocation(longitude, latitude);
-		}
-		// Get the attributes of the entity
-		@SuppressWarnings("unchecked")
-		List<Document> attributes = (List<Document>) t.get(attributesFieldName);
-		for (Document attribute : attributes){
-			MongoFlameDAO.addAttributeInJsonToEntity(entity, attribute);
 		}
 	}
 }

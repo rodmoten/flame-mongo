@@ -27,9 +27,11 @@ import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.i4hq.flame.core.AttributeDecl;
 import com.i4hq.flame.core.AttributeExpression;
 import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
+import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
 import com.i4hq.flame.core.Geo2DPoint;
@@ -77,10 +79,15 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param entity
 	 * @param t
 	 */
-	static void addAttributeInJsonToEntity(FlameEntity entity, Document t) {
+	static AttributeDecl addAttributeInJsonToEntity(FlameEntity entity, Document t) {
+		AttributeDecl attributeDecl = new AttributeDecl(t.getString(ATTRIBUTE_NAME_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
 		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)),
 				getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+		
+		return attributeDecl;
 	}
+	
+	
 
 	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
 		MetadataItem[] metadata = new MetadataItem[3];
@@ -438,11 +445,51 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		switch(expr.getOperator()){
 		case WITHIN:
 			return getAttributiesByGeospatialRegion(expr.getAttributeName(), expr.getCoordinates());
+		case FROM:
+			return getAttributesByEntityType(expr.getEntityType());		
 		default:
 			return new LinkedList<>();
 		}
 	}
 
+
+	/**
+	 * @param entityType
+	 * @return
+	 */
+	private Collection<FlameEntity> getAttributesByEntityType(EntityType entityType) {
+		if (entityType == null){
+			return new LinkedList<>();
+		}
+		final Map<String, FlameEntity> resultEntities = new HashMap<>();
+		
+		String attributesFieldName = "attributes";
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName);		
+		
+		BsonDocument lookup = new BsonDocument("$lookup",new BsonDocument(Arrays.asList(
+				new BsonElement("from", new BsonString("attributes")),
+				new BsonElement("localField", new BsonString("_id")),
+				new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
+				new BsonElement("as", new BsonString(attributesFieldName))
+				)));
+
+		// We use at least one attribute decl to reduce the result set instead of looping through all attributes.
+		AttributeDecl firstDecl = entityType.getFirstDecl();
+		
+		Document match = 
+				firstDecl == null ? 
+						new Document("$match", Filters.gte(TS_FIELD, entityType.getAge()))
+						:
+						new Document("$match", Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, firstDecl.getName()), 
+								Filters.eq(TYPE_FIELD, firstDecl.getType().toString()),
+								Filters.gte(TS_FIELD, entityType.getAge())));
+
+		List<? extends Bson> pipelines = Arrays.asList(match, lookup);
+
+		this.entityAttributesCollection.aggregate(pipelines).forEach(addAttribute);
+		
+		return resultEntities.values();
+	}
 
 	private Collection<FlameEntity> getAttributiesByGeospatialRegion(String attributeName, Geo2DPoint[] geospatialPositions) {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
