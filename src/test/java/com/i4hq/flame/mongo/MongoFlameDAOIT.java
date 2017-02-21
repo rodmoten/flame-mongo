@@ -12,7 +12,7 @@ import java.util.Map.Entry;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.i4hq.flame.core.AttributeValue;
+import com.i4hq.flame.core.Attribute;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GuidEntityIdFactory;
@@ -56,9 +56,9 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
 		String expectedType = entity.getType();
 		assertEquals("type",expectedType, retrievedEntity.getType());
-		for (Entry<String, List<AttributeValue>> expectedEntry : entity.getAttributes()) {
+		for (Entry<String, List<Attribute>> expectedEntry : entity.getAttributes()) {
 			String expectedAttributeName = expectedEntry.getKey();
-			AttributeValue expectedAttributeValue = expectedEntry.getValue().get(0);
+			Attribute expectedAttributeValue = expectedEntry.getValue().get(0);
 			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
@@ -93,9 +93,9 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 9, retrievedEntity.getAttributes().size());
 		String expectedType = entity2.getType();
 		assertEquals("type",expectedType, retrievedEntity.getType());
-		for (Entry<String, List<AttributeValue>> expectedEntry : entity2.getAttributes()) {
+		for (Entry<String, List<Attribute>> expectedEntry : entity2.getAttributes()) {
 			String expectedAttributeName = expectedEntry.getKey();
-			AttributeValue expectedAttributeValue = expectedEntry.getValue().get(0);
+			Attribute expectedAttributeValue = expectedEntry.getValue().get(0);
 			assertEquals(expectedAttributeName, expectedAttributeValue, retrievedEntity.getAttribute(expectedAttributeName));
 		}
 		
