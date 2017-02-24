@@ -33,12 +33,13 @@ import org.slf4j.LoggerFactory;
 import com.i4hq.flame.core.AttributeDecl;
 import com.i4hq.flame.core.AttributeExpression;
 import com.i4hq.flame.core.AttributeType;
-import com.i4hq.flame.core.Attribute;
+import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
 import com.i4hq.flame.core.Geo2DPoint;
 import com.i4hq.flame.core.MetadataItem;
+import com.i4hq.flame.core.Timestamp;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoClient;
@@ -90,10 +91,11 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 
 	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
-		MetadataItem[] metadata = new MetadataItem[3];
+		MetadataItem[] metadata = new MetadataItem[4];
 		metadata[0] = new MetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
 		metadata[1] = new MetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
 		metadata[2] = new MetadataItem(LONG_STRING_FIELD, t.getString(LONG_STRING_FIELD));	
+		metadata[3] = new Timestamp(t.getLong(TS_FIELD));	
 
 		return metadata;
 	}
@@ -321,12 +323,12 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		byte[] entityIdInBytes = entity.getId().getBytes();
 
 		// Create a document for each attribute.
-		for (Entry<String, List<Attribute>> attributes : entity.getAttributes()){
-			final List<Attribute> values = attributes.getValue();
+		for (Entry<String, List<AttributeValue>> attributes : entity.getAttributes()){
+			final List<AttributeValue> values = attributes.getValue();
 			if (values == null) {
 				continue;
 			}
-			for (Attribute attribute : values){
+			for (AttributeValue attribute : values){
 				AttributeDocument doc = addAttributeColumns(entityIdInBytes, attributes.getKey(), attribute);
 				doc.append(ENTITY_ID_FIELD, entity.getId());
 				doc.append(TS_FIELD, System.currentTimeMillis());
@@ -344,7 +346,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param attribute
 	 * @return
 	 */
-	private AttributeDocument addAttributeColumns(byte[] entityIdInBytes, String attributePathName, Attribute attribute) {
+	private AttributeDocument addAttributeColumns(byte[] entityIdInBytes, String attributePathName, AttributeValue attribute) {
 
 		AttributeType attributeType = attribute.getType();
 		String value = attribute.getValue();

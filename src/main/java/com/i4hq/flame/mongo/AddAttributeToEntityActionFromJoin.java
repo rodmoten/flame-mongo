@@ -39,11 +39,11 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 	}
 
 	@Override
-	public void accept(Document t) {
-		MongoFlameDAO.logger.debug("Found doc: {}", t);
-		String entityId = t.getString(MongoFlameDAO.ID_FIELD);
-		Double longitude = t.getDouble(MongoFlameDAO.LONGITUDE_FIELD);
-		Double latitude = t.getDouble(MongoFlameDAO.LATITUDE_FIELD);
+	public void accept(Document doc) {
+		MongoFlameDAO.logger.debug("Found doc: {}", doc);
+		String entityId = doc.getString(MongoFlameDAO.ID_FIELD);
+		Double longitude = doc.getDouble(MongoFlameDAO.LONGITUDE_FIELD);
+		Double latitude = doc.getDouble(MongoFlameDAO.LATITUDE_FIELD);
 		FlameEntity entity = resultEntities.get(entityId);
 		
 		// Get the attributes of the entity and check that it matches the target type.
@@ -51,7 +51,7 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 		boolean addAllAttributes = entityType == null;
 		int numOfMatchedAttributes = 0;
 		@SuppressWarnings("unchecked")
-		List<Document> attributes = (List<Document>) t.get(attributesFieldName);
+		List<Document> attributes = (List<Document>) doc.get(attributesFieldName);
 		for (Document attribute : attributes){
 			AttributeDecl attributeDecl = MongoFlameDAO.addAttributeInJsonToEntity(entity, attribute);
 			if (addAllAttributes || entityType.contains(attributeDecl)) {
