@@ -92,12 +92,19 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
 		MetadataItem[] metadata = new MetadataItem[4];
-		metadata[0] = new MetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
-		metadata[1] = new MetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
-		metadata[2] = new MetadataItem(LONG_STRING_FIELD, t.getString(LONG_STRING_FIELD));	
+		metadata[0] = createMetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
+		metadata[1] = createMetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
+		metadata[2] = createMetadataItem(LONG_STRING_FIELD, t.getString(LONG_STRING_FIELD));	
 		metadata[3] = new Timestamp(t.getLong(TS_FIELD));	
 
 		return metadata;
+	}
+	
+	static private MetadataItem createMetadataItem(String name, String value){
+		if (value == null){
+			value = "";
+		}
+		return new MetadataItem(name, value);
 	}
 
 	/**
