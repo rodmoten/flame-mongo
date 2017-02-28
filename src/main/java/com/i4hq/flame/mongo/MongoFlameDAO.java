@@ -102,7 +102,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	
 	static private MetadataItem createMetadataItem(String name, String value){
 		if (value == null){
-			value = "";
+			return null;
 		}
 		return new MetadataItem(name, value);
 	}
