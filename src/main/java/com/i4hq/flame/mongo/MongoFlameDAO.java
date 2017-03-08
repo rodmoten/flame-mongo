@@ -76,6 +76,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 	private static final int MAX_MONGO_KEY_SIZE = 256;
 
+	private static final int MAX_LIMIT = 100;
+
 	/**
 	 * @param entity
 	 * @param t
@@ -477,7 +479,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 		Consumer<Document> addAttribute = new AddAttributeToEntityAction(resultEntities);		
 
-		Bson regex = Filters.regex(ID_FIELD, ".*" + FlameEntity.ENITY_ID_ATTIRBUTE_PATH_SEPARATOR);
+		Bson regex = Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, attributePath), Filters.eq(VALUE_FIELD, value));
 		entityAttributesCollection.find(regex).forEach(addAttribute);;
 
 		return resultEntities.values();
@@ -529,8 +531,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		BsonDocument limit = createLimitDocument(limitAmount);
 		List<? extends Bson> pipelines = limit == null ? Arrays.asList(match, lookup) : Arrays.asList(match, limit, lookup);
 
-		this.entityAttributesCollection.aggregate(pipelines).forEach(addAttribute);
-
+		// If there is a limit, then don't use a cursor. This could be a problem.
+		this.entityAttributesCollection.aggregate(pipelines).useCursor(limit == null).forEach(addAttribute);
 		return resultEntities.values();
 	}
 
@@ -541,6 +543,10 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private BsonDocument createLimitDocument(int limitAmount){
 		if (limitAmount < 1){
 			return null;
+		}
+		if (limitAmount > MAX_LIMIT){
+			logger.warn("limit request exceeds the maximum. Therefore setting to maximum");
+			limitAmount = MAX_LIMIT;
 		}
 		return new BsonDocument("$limit", new BsonInt32(limitAmount));
 	}
