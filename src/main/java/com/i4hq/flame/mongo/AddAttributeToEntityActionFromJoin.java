@@ -6,7 +6,6 @@ import java.util.function.Consumer;
 
 import org.bson.Document;
 
-import com.i4hq.flame.core.AttributeDecl;
 import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
@@ -45,27 +44,17 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 		Double longitude = doc.getDouble(MongoFlameDAO.LONGITUDE_FIELD);
 		Double latitude = doc.getDouble(MongoFlameDAO.LATITUDE_FIELD);
 		FlameEntity entity = resultEntities.get(entityId);
-		
-		// Get the attributes of the entity and check that it matches the target type.
-		int numOfTargetAttributes = entityType == null ? 0 : entityType.numOfAttributes();
-		boolean addAllAttributes = entityType == null;
-		int numOfMatchedAttributes = 0;
-		@SuppressWarnings("unchecked")
-		List<Document> attributes = (List<Document>) doc.get(attributesFieldName);
-		for (Document attribute : attributes){
-			AttributeDecl attributeDecl = MongoFlameDAO.addAttributeInJsonToEntity(entity, attribute);
-			if (addAllAttributes || entityType.contains(attributeDecl)) {
-				numOfMatchedAttributes++;
-			}
-		}
-		if (numOfTargetAttributes > numOfMatchedAttributes){
-			return;
-		}
-		
 		if (entity == null){
 			entity = FlameEntityFactory.createEntity(entityId);
 			resultEntities.put(entityId, entity);
 		}
+		
+		@SuppressWarnings("unchecked")
+		List<Document> attributes = (List<Document>) doc.get(attributesFieldName);
+		for (Document attribute : attributes){
+			MongoFlameDAO.addAttributeInJsonToEntity(entity, attribute, entityType);
+		}
+		
 		if (longitude != null && latitude != null){
 			entity.setLocation(longitude, latitude);
 		}

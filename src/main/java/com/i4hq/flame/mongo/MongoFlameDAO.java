@@ -22,7 +22,6 @@ import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonElement;
-import org.bson.BsonInt32;
 import org.bson.BsonString;
 import org.bson.BsonValue;
 import org.bson.Document;
@@ -46,6 +45,7 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
 
@@ -81,13 +81,17 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	/**
 	 * @param entity
 	 * @param t
+	 * @param entityType 
 	 */
-	static AttributeDecl addAttributeInJsonToEntity(FlameEntity entity, Document t) {
-		AttributeDecl attributeDecl = new AttributeDecl(t.getString(ATTRIBUTE_NAME_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)));
-		entity.addAttribute(t.getString(ATTRIBUTE_NAME_FIELD), t.get(VALUE_FIELD), AttributeType.valueOf(t.getString(TYPE_FIELD)),
-				getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
-
-		return attributeDecl;
+	static boolean addAttributeInJsonToEntity(FlameEntity entity, Document t, EntityType entityType) {
+		String name = t.getString(ATTRIBUTE_NAME_FIELD);
+		AttributeType valueType = AttributeType.valueOf(t.getString(TYPE_FIELD));
+		
+		if (entityType == null || entityType.contains(new AttributeDecl(name, valueType))){
+			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+			return true;
+		}
+		return false;
 	}
 
 
@@ -510,28 +514,27 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
 
 		String attributesFieldName = "attributes";
-		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName);
-
-		BsonDocument lookup = new BsonDocument("$lookup",
-				new BsonDocument(Arrays.asList(new BsonElement("from", new BsonString("attributes")),
-						new BsonElement("localField", new BsonString("_id")),
-						new BsonElement("foreignField", new BsonString(ENTITY_ID_FIELD)),
-						new BsonElement("as", new BsonString(attributesFieldName)))));
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName, entityType);
 
 		// We use at least one attribute decl to reduce the result set instead
 		// of looping through all attributes.
 		AttributeDecl firstDecl = entityType.getFirstDecl();
+		
+		Bson match = firstDecl == null ? Filters.gte(TS_FIELD, entityType.getAge()) :
+				Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, firstDecl.getName()),
+						Filters.eq(TYPE_FIELD, firstDecl.getType().toString()),
+					Filters.gte(TS_FIELD, entityType.getAge()));
+				
+//				firstDecl == null ? new BsonDocument("$match", new BsonDocument(TS_FIELD, new BsonDocument("$gte", new BsonInt64(entityType.getAge()))))
+//				:BsonDocument.parse(String.format("{$gte : NumberLong(%d)}", entityType.getAge()));
+				/*new BsonDocument("$match", new BsonDocument(Arrays.asList(new BsonElement(ATTRIBUTE_NAME_FIELD, new BsonString(firstDecl.getName())),
+						new BsonElement(ATTRIBUTE_NAME_FIELD, new BsonString(firstDecl.getName())),
+						new BsonElement(TYPE_FIELD, new BsonString(firstDecl.getType().toString())),
+						new BsonElement(TS_FIELD, BsonDocument.parse(String.format("{$gte : NumberLong(%d)}", entityType.getAge()))))));
+						//new BsonElement(TS_FIELD, new BsonDocument("$gte", new BsonInt64(entityType.getAge()))))));
+		*/
 
-		Document match = firstDecl == null ? new Document("$match", Filters.gte(TS_FIELD, entityType.getAge()))
-				: new Document("$match",
-						Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, firstDecl.getName()),
-								Filters.eq(TYPE_FIELD, firstDecl.getType().toString()),
-								Filters.gte(TS_FIELD, entityType.getAge())));
-
-		BsonDocument limit = createLimitDocument(limitAmount);
-		List<? extends Bson> pipelines = limit == null ? Arrays.asList(match, lookup) : Arrays.asList(match, limit, lookup);
-
-		this.entityAttributesCollection.aggregate(pipelines).forEach(addAttribute);
+		this.entityAttributesCollection.find(match).limit(determineLimit(limitAmount)).forEach(addAttribute);
 		return resultEntities.values();
 	}
 
@@ -539,7 +542,11 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param limitAmount
 	 * @return Returns null if the input parameter is non-positive.
 	 */
-	private BsonDocument createLimitDocument(int limitAmount){
+	private Bson createLimitDocument(int limitAmount){
+		return Aggregates.limit(determineLimit(limitAmount));
+	}
+	
+	private int determineLimit(int limitAmount){
 		if (limitAmount < 1){
 			limitAmount = MAX_LIMIT;
 			logger.debug("no limit set. Using the maximum limit of {}", limitAmount);
@@ -548,7 +555,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			logger.warn("limit request exceeds the maximum. Therefore setting to maximum");
 			limitAmount = MAX_LIMIT;
 		}
-		return new BsonDocument("$limit", new BsonInt32(limitAmount));
+		return limitAmount;
 	}
 	private Collection<FlameEntity> getAttributiesByGeospatialRegion(String attributeName, Geo2DPoint[] geospatialPositions, int limitAmount) {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
@@ -594,7 +601,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 				new BsonElement("as", new BsonString(attributesFieldName))
 				)));
 
-		BsonDocument limit = createLimitDocument(limitAmount);
+		Bson limit = createLimitDocument(limitAmount);
 		List<? extends Bson> pipelines = limit == null ? Arrays.asList(match, lookup) : Arrays.asList(match, limit, lookup);
 
 		entitiesCollection.aggregate(pipelines).forEach(addAttribute);

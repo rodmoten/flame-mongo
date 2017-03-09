@@ -5,15 +5,25 @@ import java.util.function.Consumer;
 
 import org.bson.Document;
 
+import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
 
 final class AddAttributeToEntityAction implements Consumer<Document> {
 	private final Map<String, FlameEntity> resultEntities;
+	private final EntityType entityType;
 
 	AddAttributeToEntityAction(Map<String, FlameEntity> resultEntities) {
-		this.resultEntities = resultEntities;
+		this(resultEntities, null);
 	}
+
+	
+	AddAttributeToEntityAction(Map<String, FlameEntity> resultEntities, EntityType entityType) {
+		super();
+		this.resultEntities = resultEntities;
+		this.entityType = entityType;
+	}
+
 
 	@Override
 	public void accept(Document t) {
@@ -24,7 +34,8 @@ final class AddAttributeToEntityAction implements Consumer<Document> {
 			entity = FlameEntityFactory.createEntity(entityId);
 			resultEntities.put(entityId, entity);
 		}
-		MongoFlameDAO.addAttributeInJsonToEntity(entity, t);
+		
+		MongoFlameDAO.addAttributeInJsonToEntity(entity, t, entityType);
 	}
 
 }
