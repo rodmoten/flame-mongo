@@ -76,7 +76,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 	private static final int MAX_MONGO_KEY_SIZE = 256;
 
-	private static final int MAX_LIMIT = 100;
+	private static final int MAX_LIMIT = 1024 * 10;
 
 	/**
 	 * @param entity
@@ -531,8 +531,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		BsonDocument limit = createLimitDocument(limitAmount);
 		List<? extends Bson> pipelines = limit == null ? Arrays.asList(match, lookup) : Arrays.asList(match, limit, lookup);
 
-		// If there is a limit, then don't use a cursor. This could be a problem.
-		this.entityAttributesCollection.aggregate(pipelines).useCursor(limit == null).forEach(addAttribute);
+		this.entityAttributesCollection.aggregate(pipelines).forEach(addAttribute);
 		return resultEntities.values();
 	}
 
@@ -542,7 +541,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 */
 	private BsonDocument createLimitDocument(int limitAmount){
 		if (limitAmount < 1){
-			return null;
+			limitAmount = MAX_LIMIT;
+			logger.debug("no limit set. Using the maximum limit of {}", limitAmount);
 		}
 		if (limitAmount > MAX_LIMIT){
 			logger.warn("limit request exceeds the maximum. Therefore setting to maximum");
