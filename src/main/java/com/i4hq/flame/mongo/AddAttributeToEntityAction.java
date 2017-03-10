@@ -28,7 +28,7 @@ final class AddAttributeToEntityAction implements Consumer<Document> {
 	@Override
 	public void accept(Document t) {
 		MongoFlameDAO.logger.debug("Found doc: {}", t);
-		String entityId = t.getString(MongoFlameDAO.ID_FIELD);
+		String entityId = t.getString(MongoFlameDAO.ENTITY_ID_FIELD);
 		FlameEntity entity = resultEntities.get(entityId);
 		if (entity == null){
 			entity = FlameEntityFactory.createEntity(entityId);

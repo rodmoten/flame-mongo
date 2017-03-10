@@ -19,28 +19,30 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 	private final Map<String, FlameEntity> resultEntities;
 	private final String attributesFieldName;
 	private final EntityType entityType;
+	private final String entityIdFieldName;
 
 	/**
 	 * @param resultEntities
 	 * @param attributesFieldName
 	 * @param entityType
 	 */
-	public AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName,
+	public AddAttributeToEntityActionFromJoin(String entityIdFieldName, Map<String, FlameEntity> resultEntities, String attributesFieldName,
 			EntityType entityType) {
 		super();
 		this.resultEntities = resultEntities;
 		this.attributesFieldName = attributesFieldName;
 		this.entityType = entityType;
+		this.entityIdFieldName = entityIdFieldName;
 	}
 
 	AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {
-		this(resultEntities, attributesFieldName, null);
+		this(MongoFlameDAO.ID_FIELD, resultEntities, attributesFieldName, null);
 	}
 
 	@Override
 	public void accept(Document doc) {
 		MongoFlameDAO.logger.debug("Found doc: {}", doc);
-		String entityId = doc.getString(MongoFlameDAO.ID_FIELD);
+		String entityId = doc.getString(entityIdFieldName);
 		Double longitude = doc.getDouble(MongoFlameDAO.LONGITUDE_FIELD);
 		Double latitude = doc.getDouble(MongoFlameDAO.LATITUDE_FIELD);
 		FlameEntity entity = resultEntities.get(entityId);

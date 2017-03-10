@@ -29,7 +29,6 @@ import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.i4hq.flame.core.AttributeDecl;
 import com.i4hq.flame.core.AttributeExpression;
 import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
@@ -38,7 +37,6 @@ import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityDAO;
 import com.i4hq.flame.core.Geo2DPoint;
 import com.i4hq.flame.core.MetadataItem;
-import com.i4hq.flame.core.Timestamp;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoClient;
@@ -60,8 +58,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	/**
 	 * Constants for Document field names.
 	 */
-	private static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
-	private static final String ENTITY_ID_FIELD = "entity_id";
+	static final String ATTRIBUTE_NAME_FIELD = "attribute_name";
+	static final String ENTITY_ID_FIELD = "entity_id";
 	static final String ID_FIELD = "_id";
 	static final String LATITUDE_FIELD = "latitude";
 	static final String LOCATION_FIELD = "loc";
@@ -81,31 +79,48 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	/**
 	 * @param entity
 	 * @param t
-	 * @param entityType 
+	 * @param entityType - used to ensure attributes in the  entity type have the correct attribute type. Not used for attribute not in the entityType. As a result, we can do subsumption.
 	 */
 	static boolean addAttributeInJsonToEntity(FlameEntity entity, Document t, EntityType entityType) {
 		String name = t.getString(ATTRIBUTE_NAME_FIELD);
 		AttributeType valueType = AttributeType.valueOf(t.getString(TYPE_FIELD));
-		
-		if (entityType == null || entityType.contains(new AttributeDecl(name, valueType))){
+		if (entityType == null){
 			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
 			return true;
 		}
+		AttributeType declaredType = entityType.getAttributeType(name);
+		if (declaredType == null || declaredType == valueType){
+			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+			return true;
+		}
+
 		return false;
 	}
 
 
 
+	/**
+	 * @param t
+	 * @param referenceField
+	 * @param textField
+	 * @return
+	 */
 	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
-		MetadataItem[] metadata = new MetadataItem[4];
-		metadata[0] = createMetadataItem(REFERENCE_FIELD, t.getString(REFERENCE_FIELD));
-		metadata[1] = createMetadataItem(TEXT_FIELD, t.getString(TEXT_FIELD));	
-		metadata[2] = createMetadataItem(LONG_STRING_FIELD, t.getString(LONG_STRING_FIELD));	
-		metadata[3] = new Timestamp(t.getLong(TS_FIELD));	
-
-		return metadata;
+		// Metadata is any field other than _id, value, entity_id, and attribute_name.
+		List<MetadataItem> metadata = new ArrayList<>();
+		for (Entry<String, Object> field : t.entrySet()){
+			Object value = field.getValue();
+			if (value == null || !(value instanceof String)){
+				continue;
+			}
+			MetadataItem metadataItem = createMetadataItem(field.getKey(), (String) value);
+			if (metadataItem != null){
+				metadata.add(metadataItem);
+			}
+		}
+		return metadata.toArray(new MetadataItem[0]);
 	}
-	
+
 	static private MetadataItem createMetadataItem(String name, String value){
 		if (value == null){
 			return null;
@@ -513,28 +528,30 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		}
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
 
-		String attributesFieldName = "attributes";
-		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(resultEntities, attributesFieldName, entityType);
+		String attributesLookupName = "attributes";
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(ENTITY_ID_FIELD, resultEntities, attributesLookupName, entityType);
 
 		// We use at least one attribute decl to reduce the result set instead
 		// of looping through all attributes.
-		AttributeDecl firstDecl = entityType.getFirstDecl();
-		
-		Bson match = firstDecl == null ? Filters.gte(TS_FIELD, entityType.getAge()) :
-				Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, firstDecl.getName()),
-						Filters.eq(TYPE_FIELD, firstDecl.getType().toString()),
-					Filters.gte(TS_FIELD, entityType.getAge()));
-				
-//				firstDecl == null ? new BsonDocument("$match", new BsonDocument(TS_FIELD, new BsonDocument("$gte", new BsonInt64(entityType.getAge()))))
-//				:BsonDocument.parse(String.format("{$gte : NumberLong(%d)}", entityType.getAge()));
-				/*new BsonDocument("$match", new BsonDocument(Arrays.asList(new BsonElement(ATTRIBUTE_NAME_FIELD, new BsonString(firstDecl.getName())),
-						new BsonElement(ATTRIBUTE_NAME_FIELD, new BsonString(firstDecl.getName())),
-						new BsonElement(TYPE_FIELD, new BsonString(firstDecl.getType().toString())),
-						new BsonElement(TS_FIELD, BsonDocument.parse(String.format("{$gte : NumberLong(%d)}", entityType.getAge()))))));
-						//new BsonElement(TS_FIELD, new BsonDocument("$gte", new BsonInt64(entityType.getAge()))))));
-		*/
+		Set<String> attributeNamesInEntityType = entityType.getAttributeNames();
 
-		this.entityAttributesCollection.find(match).limit(determineLimit(limitAmount)).forEach(addAttribute);
+		// TODO Need to implement this.
+		// db.attributes.aggregate([{$match: {attribute_name: 'blah'}}, 
+		// {$lookup: {from: 'entities', localField: 'entity_id', foreignField: '_id', as: 'attributes'}}, 
+		// {$lookup: {from: 'attributes', localField: 'entity_id', foreignField: 'entity_id', as: 'more_attributes'}}])
+
+		Bson match;
+		if (attributeNamesInEntityType.isEmpty()){
+			match = Aggregates.match(Filters.gte(TS_FIELD, entityType.getAge()));
+		} else {
+			match = Aggregates.match(Filters.and(Filters.in(ATTRIBUTE_NAME_FIELD, attributeNamesInEntityType),
+					Filters.gte(TS_FIELD, entityType.getAge())));
+		}
+		Bson limit = Aggregates.limit(determineLimit(limitAmount));
+		Bson entityLookup = Aggregates.lookup("entities", ENTITY_ID_FIELD, ID_FIELD, "entities");
+		Bson attributeLookup = Aggregates.lookup(attributesLookupName, ENTITY_ID_FIELD, ENTITY_ID_FIELD, attributesLookupName);
+
+		this.entityAttributesCollection.aggregate(Arrays.asList(match, entityLookup, attributeLookup, limit)).forEach(addAttribute);
 		return resultEntities.values();
 	}
 
@@ -545,7 +562,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private Bson createLimitDocument(int limitAmount){
 		return Aggregates.limit(determineLimit(limitAmount));
 	}
-	
+
 	private int determineLimit(int limitAmount){
 		if (limitAmount < 1){
 			limitAmount = MAX_LIMIT;
