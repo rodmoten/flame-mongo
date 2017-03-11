@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -15,6 +16,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.i4hq.flame.core.AttributeDecl;
+import com.i4hq.flame.core.AttributeExpression;
 import com.i4hq.flame.core.AttributeType;
 import com.i4hq.flame.core.AttributeValue;
 import com.i4hq.flame.core.EntityType;
@@ -96,7 +98,7 @@ public class MongoFlameDAOIT {
 
 		FlameEntity retrievedEntity = dao.getEntitiesById(id2);
 		assertEquals("num of attributes before flush", 0, retrievedEntity.getAttributes().size());
-		dao.setBufferWriteThreshold(10);
+		dao.setBufferWriteThreshold(1);
 		FlameEntity entity1 = readEntityFromFile("src/test/resources/entity1.json");
 
 		assertEquals("saved", true, dao.save(entity1));
@@ -125,23 +127,25 @@ public class MongoFlameDAOIT {
 	@Test
 	public void addAttributeInJsonToEntity_withEntityType() throws Throwable{
 		FlameEntity entity = FlameEntityFactory.createEntity("blah");
-		EntityType et = new EntityType(new AttributeDecl("properties:report", AttributeType.BOOLEAN), new AttributeDecl("sloppy", AttributeType.NUMBER));
+		EntityType et = new EntityType(100, new AttributeDecl("properties:report", AttributeType.BOOLEAN), new AttributeDecl("sloppy", AttributeType.NUMBER));
 
 		Document doc = Document.parse("{ \"_id\" : \"2e221ea12073022a28c69444aaf52731\", \"value\" : true, \"attribute_name\" : \"properties:report\", \"type\" : \"BOOLEAN\", "
-				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(1)}");
+				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(100)}");
 		assertEquals("properties:report boolean", true , MongoFlameDAO.addAttributeInJsonToEntity(entity, doc, et));
 
 		doc = Document.parse("{ \"_id\" : \"2e221ea12073022a28c69444aaf52732\", \"value\" : 'silly', \"attribute_name\" : \"properties:report\", \"type\" : \"STRING\", "
-				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(2)}");
+				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(200)}");
 		assertEquals("properties:report string", false , MongoFlameDAO.addAttributeInJsonToEntity(entity, doc, et));
 
 		doc = Document.parse("{ \"_id\" : \"2e221ea12073022a28c69444aaf52733\", \"value\" : 13, \"attribute_name\" : \"sloppy\", \"type\" : \"NUMBER\", "
-				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(3)}");
+				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(300)}");
 		assertEquals("properties:report string", true , MongoFlameDAO.addAttributeInJsonToEntity(entity, doc, et));
 
-		doc = Document.parse("{ \"_id\" : \"2e221ea12073022a28c69444aaf52734\", \"value\" : 13, \"attribute_name\" : \"SLOPPY\", \"type\" : \"NUMBER\", "
-				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(4)}");
+		// Not added because of the wrong attribute type
+		doc = Document.parse("{ \"_id\" : \"2e221ea12073022a28c69444aaf52734\", \"value\" : 13, \"attribute_name\" : \"sloppy\", \"type\" : \"STRING\", "
+				+ "\"entity_id\" : \"8ffb6805518c29e27df949dc6eb1f70a\" 'ts':NumberLong(400)}");
 		assertEquals("properties:report string", false , MongoFlameDAO.addAttributeInJsonToEntity(entity, doc, et));
+		
 
 		assertEquals("properties:report value", "true", entity.getAttribute("properties:report").getValue());
 		assertEquals("properties:report Count", 1, entity.getAttributes("properties:report").size());
@@ -149,6 +153,26 @@ public class MongoFlameDAOIT {
 		assertEquals("sloppy value", "13", entity.getAttribute("sloppy").getValue());
 	}
 
+	
+	@Test
+	public void retrieveEntityByTypeWithAge() throws  Exception{
+		final String filePath = "src/test/resources/entity2.json";
+		FlameEntity entity2 = readEntityFromFile(filePath);
+
+		assertEquals("saved", true, dao.save(entity2));
+		dao.flush();
+		Thread.sleep(1000);
+		long newerThanEntity2 = System.currentTimeMillis();
+
+		Thread.sleep(1000);
+		FlameEntity entity1 = readEntityFromFile("src/test/resources/entity1.json");
+
+		assertEquals("saved", true, dao.save(entity1));
+		Collection<FlameEntity> result = dao.getEntitiesByAttributeExpression(AttributeExpression.fromType(new EntityType(newerThanEntity2)));
+		assertEquals(1, result.size());
+		assertEquals(entity1.getId(), result.toArray(new FlameEntity[0])[0].getId());		
+	}
+	
 	private StringBuilder readJsonFromFile(String filePath) throws FileNotFoundException, IOException {
 		BufferedReader reader = new BufferedReader (new FileReader (filePath));
 		StringBuilder jsonText = new StringBuilder();
