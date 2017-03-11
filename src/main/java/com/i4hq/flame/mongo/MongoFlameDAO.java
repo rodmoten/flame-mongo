@@ -359,7 +359,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			for (AttributeValue attribute : values){
 				AttributeDocument doc = addAttributeColumns(entityIdInBytes, attributes.getKey(), attribute);
 				doc.append(ENTITY_ID_FIELD, entity.getId());
-				doc.append(TS_FIELD, System.currentTimeMillis());
+				doc.append(TS_FIELD, entity.getTimestamp());
 				docs.add(doc);
 			}
 		}
