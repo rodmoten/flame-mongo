@@ -21,7 +21,9 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 	private final EntityType entityType;
 	private final String entityIdFieldName;
 
+
 	/**
+	 * @param entityIdFieldName
 	 * @param resultEntities
 	 * @param attributesFieldName
 	 * @param entityType
@@ -33,6 +35,17 @@ final class AddAttributeToEntityActionFromJoin implements Consumer<Document> {
 		this.attributesFieldName = attributesFieldName;
 		this.entityType = entityType;
 		this.entityIdFieldName = entityIdFieldName;
+	}
+	
+	
+	/**
+	 * @param entityIdFieldName
+	 * @param resultEntities
+	 * @param attributesFieldName
+	 * @param entityType
+	 */
+	public AddAttributeToEntityActionFromJoin(String entityIdFieldName, Map<String, FlameEntity> resultEntities, String attributesFieldName) {
+		this(entityIdFieldName, resultEntities, attributesFieldName, null);
 	}
 
 	AddAttributeToEntityActionFromJoin(Map<String, FlameEntity> resultEntities, String attributesFieldName) {

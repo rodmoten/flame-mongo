@@ -85,12 +85,12 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		String name = t.getString(ATTRIBUTE_NAME_FIELD);
 		AttributeType valueType = AttributeType.valueOf(t.getString(TYPE_FIELD));
 		if (entityType == null){
-			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t));
 			return true;
 		}
 		AttributeType declaredType = entityType.getAttributeType(name);
 		if (declaredType == null || declaredType == valueType){
-			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t, REFERENCE_FIELD, TEXT_FIELD));
+			entity.addAttribute(name, t.get(VALUE_FIELD), valueType, getMetadata(t));
 			return true;
 		}
 
@@ -105,7 +105,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 * @param textField
 	 * @return
 	 */
-	static private MetadataItem[] getMetadata(Document t, String referenceField, String textField) {
+	static private MetadataItem[] getMetadata(Document t) {
 		// Metadata is any field other than _id, value, entity_id, and attribute_name.
 		List<MetadataItem> metadata = new ArrayList<>();
 		for (Entry<String, Object> field : t.entrySet()){
@@ -495,12 +495,16 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	@Override
 	public Collection<FlameEntity> getEntitiesWithAttributeValue(String attributePath, String value) {
 		final Map<String, FlameEntity> resultEntities = new HashMap<>();
+		int limitAmount = 10 * 1000;
+		
+		String attributesLookupName = "attributes";
+		Consumer<Document> addAttribute = new AddAttributeToEntityActionFromJoin(ENTITY_ID_FIELD, resultEntities, attributesLookupName);
 
-		Consumer<Document> addAttribute = new AddAttributeToEntityAction(resultEntities);		
-
-		Bson regex = Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, attributePath), Filters.eq(VALUE_FIELD, value));
-		entityAttributesCollection.find(regex).forEach(addAttribute);;
-
+		Bson match = Aggregates.match(Filters.and(Filters.eq(ATTRIBUTE_NAME_FIELD, attributePath), Filters.eq(VALUE_FIELD, value)));
+		Bson entityLookup = Aggregates.lookup("entities", ENTITY_ID_FIELD, ID_FIELD, "entities");
+		Bson attributeLookup = Aggregates.lookup(attributesLookupName, ENTITY_ID_FIELD, ENTITY_ID_FIELD, attributesLookupName);
+		Bson limit = Aggregates.limit(determineLimit(limitAmount));
+		this.entityAttributesCollection.aggregate(Arrays.asList(match, entityLookup, attributeLookup, limit)).forEach(addAttribute);
 		return resultEntities.values();
 	}
 

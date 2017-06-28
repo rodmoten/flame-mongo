@@ -23,6 +23,7 @@ import com.i4hq.flame.core.EntityType;
 import com.i4hq.flame.core.FlameEntity;
 import com.i4hq.flame.core.FlameEntityFactory;
 import com.i4hq.flame.core.GuidEntityIdFactory;
+import com.i4hq.flame.core.MetadataItem;
 import com.mongodb.MongoClient;
 
 public class MongoFlameDAOIT {
@@ -52,6 +53,37 @@ public class MongoFlameDAOIT {
 		{
 			t.printStackTrace();
 		}
+	}
+	
+	/**
+	 * Test we can use any additional column as metadata.
+	 * @throws Exception
+	 */
+	@Test 
+	public void testAnyMetadata() throws Exception{
+		dao.setBufferWriteThreshold(0);
+		
+		FlameEntity entity = new MongoFlameEntity("test1", dao);
+		entity.addAttribute("noMetadata", "abcde", AttributeType.STRING);
+		MetadataItem i1 = new MetadataItem("i1", "A");
+		MetadataItem i2 = new MetadataItem("i2", "B");
+		MetadataItem i3 = new MetadataItem("i3", "C");
+		final String metadataAttribute = "hasMetadata";
+		entity.addAttribute(metadataAttribute, "xyz", AttributeType.STRING, i1, i2, i3);
+		
+		assertEquals("saved", true, dao.save(entity));
+
+
+		Collection<FlameEntity> results = dao.getEntitiesWithAttributeValue(metadataAttribute, "xyz");
+		assertEquals("num of results", 1, results.size());
+		FlameEntity retrievedEntity = (FlameEntity) results.toArray()[0];
+		assertEquals("num of attributes", 2, retrievedEntity.getAttributes().size());
+		AttributeValue actualAttributeValue = retrievedEntity.getAttribute(metadataAttribute);
+		assertEquals("value of metadata attribute", actualAttributeValue.getValue(), "xyz");
+		assertEquals("metadata i1", "A", actualAttributeValue.getMetadataValue("i1"));
+		assertEquals("metadata i2", "B", actualAttributeValue.getMetadataValue("i2"));
+		assertEquals("metadata i3", "C", actualAttributeValue.getMetadataValue("i3"));
+		
 	}
 
 	@Test
