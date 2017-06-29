@@ -107,13 +107,24 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	 */
 	static private MetadataItem[] getMetadata(Document t) {
 		// Metadata is any field other than _id, value, entity_id, and attribute_name.
+		String[] defaultFields = {VALUE_FIELD, ATTRIBUTE_NAME_FIELD, ID_FIELD, ENTITY_ID_FIELD};
 		List<MetadataItem> metadata = new ArrayList<>();
 		for (Entry<String, Object> field : t.entrySet()){
-			Object value = field.getValue();
-			if (value == null || !(value instanceof String)){
+			boolean isDefaultField = false;
+			for (int i = 0; i < defaultFields.length; i++){
+				if (defaultFields[i].equals(field.getKey())){
+					i = defaultFields.length;
+					isDefaultField = true;
+				}
+			}
+			if (isDefaultField){
 				continue;
 			}
-			MetadataItem metadataItem = createMetadataItem(field.getKey(), (String) value);
+			Object value = field.getValue();
+			if (value == null){
+				continue;
+			}
+			MetadataItem metadataItem = createMetadataItem(field.getKey(), value.toString());
 			if (metadataItem != null){
 				metadata.add(metadataItem);
 			}

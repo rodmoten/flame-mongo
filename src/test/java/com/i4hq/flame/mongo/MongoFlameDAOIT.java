@@ -1,6 +1,6 @@
 package com.i4hq.flame.mongo;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 import static org.junit.Assert.assertTrue;
 
 import java.io.BufferedReader;
@@ -32,27 +32,15 @@ public class MongoFlameDAOIT {
 
 	@Before
 	public void setUp() throws Exception {
-		executeScript("/Users/rmoten/git/flame-mongo/src/test/bash/setup-test.sh");
-		MongoClient mongoClient = new MongoClient(System.getProperty("mongo.host", "localhost"));
-		mongoClient.dropDatabase("flame");
+		String testDb = "test&flame";
+		System.setProperty("mongo.db", testDb);
+		System.setProperty("mongo.host", "localhost");
+		MongoClient mongoClient = new MongoClient("localhost");
+		mongoClient.dropDatabase(testDb);
 		mongoClient.close();
+
 		dao = MongoFlameDAO.getInstance();
 
-	}
-
-	private void executeScript(String script) {
-		try
-		{    
-			String target = new String(script);
-			Runtime rt = Runtime.getRuntime();
-			String[] envp = {"PATH=/Users/rmoten/dev/apps/mongodb-osx-x86_64-3.4.1/bin/mongod"};
-			Process process = rt.exec(target, envp);
-			process.waitFor();
-
-		} catch (Throwable t)
-		{
-			t.printStackTrace();
-		}
 	}
 	
 	/**
@@ -65,7 +53,7 @@ public class MongoFlameDAOIT {
 		
 		FlameEntity entity = new MongoFlameEntity("test1", dao);
 		entity.addAttribute("noMetadata", "abcde", AttributeType.STRING);
-		MetadataItem i1 = new MetadataItem("i1", "A");
+		MetadataItem i1 = new MetadataItem("i1", "1.0");
 		MetadataItem i2 = new MetadataItem("i2", "B");
 		MetadataItem i3 = new MetadataItem("i3", "C");
 		final String metadataAttribute = "hasMetadata";
@@ -80,11 +68,15 @@ public class MongoFlameDAOIT {
 		assertEquals("num of attributes", 2, retrievedEntity.getAttributes().size());
 		AttributeValue actualAttributeValue = retrievedEntity.getAttribute(metadataAttribute);
 		assertEquals("value of metadata attribute", actualAttributeValue.getValue(), "xyz");
-		assertEquals("metadata i1", "A", actualAttributeValue.getMetadataValue("i1"));
+		assertEquals("metadata i1", "1.0", actualAttributeValue.getMetadataValue("i1"));
 		assertEquals("metadata i2", "B", actualAttributeValue.getMetadataValue("i2"));
 		assertEquals("metadata i3", "C", actualAttributeValue.getMetadataValue("i3"));
-		
-	}
+		assertEquals("metadata i3", "C", actualAttributeValue.getMetadataValue("i3"));
+		assertNull("metadata value", actualAttributeValue.getMetadataValue("value"));
+		assertNull("metadata _id", actualAttributeValue.getMetadataValue("_id"));
+		assertNull("metadata attribute_name", actualAttributeValue.getMetadataValue("attribute_name"));
+		assertNull("metadata entity_id", actualAttributeValue.getMetadataValue("entity_id"));
+}
 
 	@Test
 	public void testSaveEntity_unbufferedWrites() throws Throwable {
