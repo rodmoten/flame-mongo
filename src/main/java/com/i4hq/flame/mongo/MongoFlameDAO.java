@@ -155,7 +155,11 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	//private static MongoFlameDAO instance = new MongoFlameDAO();
 
 	public static MongoFlameDAO getInstance() {
-		return new MongoFlameDAO();
+		return new MongoFlameDAO(System.getProperty("mongo.db", "flame"));
+	}
+	
+	public static MongoFlameDAO getInstance(String dbName) {
+		return new MongoFlameDAO(dbName);
 	}
 
 	private boolean isConnected = false;
@@ -166,6 +170,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 	private MongoCollection<Document> referenceCollection;
 	private MongoCollection<Document> geoCollection;
 	private final UpdateOptions upsertOption;
+	private final String dbName;
 
 	private BulkOperation[] bulkWriters = new BulkOperation[5];
 	final private int entityAttributesBulkWriter = 0;
@@ -182,7 +187,8 @@ public class MongoFlameDAO implements FlameEntityDAO {
 
 
 
-	private MongoFlameDAO () {
+	private MongoFlameDAO (String dbName) {
+		this.dbName = dbName;
 		init();
 		upsertOption = new UpdateOptions();
 		upsertOption.upsert(true);
@@ -226,7 +232,7 @@ public class MongoFlameDAO implements FlameEntityDAO {
 			return;
 		}
 		mongoClient = new MongoClient(System.getProperty("mongo.host", "localhost"));
-		database = mongoClient.getDatabase(System.getProperty("mongo.db", "flame"));
+		database = mongoClient.getDatabase(dbName);
 		entitiesCollection = database.getCollection("entities");
 		typesCollection = database.getCollection("types");
 		entityAttributesCollection = database.getCollection("attributes");
@@ -247,6 +253,10 @@ public class MongoFlameDAO implements FlameEntityDAO {
 		init();
 		return isConnected;
 	}
+
+
+	
+
 
 
 	/* (non-Javadoc)
