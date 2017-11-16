@@ -1,5 +1,14 @@
-mongo $* << EOF
-use flame
+case $# in
+0|1)   echo "usage: db host"
+       exit 1
+;;
+
+*)  DB=$1
+    HOST=$2
+;;
+esac
+
+mongo $HOST/$DB << EOF
 db.runCommand( { dropDatabase: 1 } );
 db.attributes.createIndex({ts : 1});
 db.attributes.createIndex({entity_id : 1, attribute_name : 1});
